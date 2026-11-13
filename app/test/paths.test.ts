@@ -12,7 +12,7 @@ describe('userDataDir', () => {
     expect(userDataDir()).toBe('/tmp/profile')
   })
   it('is a Yogurt folder in app data otherwise', () => {
-    expect(userDataDir()).toBe(join('/fake/appData', 'Yogurt'))
+    expect(userDataDir()).toBe(join('/fake/appData', 'Yogurt Projects'))
   })
 })
 

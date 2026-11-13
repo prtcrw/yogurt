@@ -329,3 +329,14 @@ describe('notes queue', () => {
     })
   })
 })
+
+
+it('project jobs do not require a local LLM and yield to a recording without automatic inference retries', async () => {
+  let recording = false, starts = 0
+  const q = createQueue({ recording: () => recording, smallMac: false, modelReady: () => false })
+  const done = q.enqueue(async signal => { starts++; await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })) }, 'project')
+  await tick(); expect(starts).toBe(1)
+  recording = true; q.recordingChanged(); await done
+  recording = false; q.recordingChanged(); await tick()
+  expect(starts).toBe(1); expect(q.busy()).toBe(false)
+})

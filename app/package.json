@@ -1,6 +1,6 @@
 {
   "name": "@yogurt/app",
-  "version": "0.3.11",
+  "version": "0.3.11-projects.1",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
@@ -10,7 +10,9 @@
     "test": "vitest run",
     "e2e": "node scripts/native.mjs && electron-vite build && playwright test",
     "native": "node scripts/native.mjs",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "project-audio": "bash scripts/project-audio-build.sh",
+    "package-local": "node scripts/package-local.mjs"
   },
   "dependencies": {
     "chrono-node": "2.10.3",
@@ -52,9 +54,9 @@
     "yauzl": "3.4.0",
     "yazl": "3.3.1"
   },
-  "productName": "Yogurt",
+  "productName": "Yogurt Projects",
   "desktopName": "yogurt.desktop",
-  "description": "Free, private, open-source AI meeting notes for Mac, Windows and Linux.",
+  "description": "Yogurt fork with project workflows, Obsidian exports and selectable summary providers.",
   "author": "Frigade",
   "license": "MIT"
 }

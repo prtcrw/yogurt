@@ -1,3 +1,5 @@
+> **Local fork: Yogurt Projects.** Project workflows, Obsidian exports, speaker profiles and selectable summary providers. Read [setup, storage policy and limitations](PROJECT_WORKFLOWS.md).
+
 <p align="center">
   <a href="https://yogurt.so?utm_source=github&utm_medium=readme&utm_campaign=yogurt">
     <img src="docs/assets/readme-header.svg" width="212" height="86" alt="Yogurt. Take note.">

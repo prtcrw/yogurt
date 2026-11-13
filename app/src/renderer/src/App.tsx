@@ -1,3 +1,4 @@
+import { Projects } from './screens/Projects'
 import { LoadingContent } from './components/LoadingContent'
 import { MeetingListLoading } from './screens/Home'
 import { StartRecording } from './components/StartRecording'
@@ -169,6 +170,8 @@ export function App() {
     open(s.meetingId)
   }
 
+  if (route === '/projects') return <div className="h-full bg-bg text-ink overflow-auto"><TitleBar /><Projects back={() => go('')} /></div>
+
   // still starting, or checking what is on disk: the launch screen, so a finished install never flashes the first-run screen
   if (!setup || !plan || holding) return <div data-testid="app-shell" className="h-full bg-bg"><TitleBar /><BootScreen /></div>
   const noteId = route.startsWith('/note/') ? route.slice(6) : null
@@ -180,14 +183,14 @@ export function App() {
   const suggestedFolder = noteId ? folders?.find((s) => s.id === suggestedFolders[noteId]) : undefined
   // a folder's page waits for the list; a folder that is gone shows Meetings
   const folderScreen = folderId && (folder ? <Folder key={folder.id} folder={folder} open={open} onStarted={(id) => setSuggestedFolders((current) => ({ ...current, [id]: folder.id }))} /> : !folders ? <div className="native-folder"><StartRecording /><div className="native-library"><LoadingContent pending testId="meetings-loading" skeleton={<><div className="folder-page-heading"><h1><span className="loading-bar" style={{ width: 140 }} /></h1></div><MeetingListLoading showFolders={false} /></>} /></div></div> : null)
-  const screen = settings ? <Settings revision={settingsRevision} /> : noteId ? <Note key={noteId} id={noteId} onSource={openSource} onTitleChange={setMeeting} at={jump?.id === noteId ? jump : undefined}
+  const screen = route === '/projects' ? <Projects /> : settings ? <Settings revision={settingsRevision} /> : noteId ? <Note key={noteId} id={noteId} onSource={openSource} onTitleChange={setMeeting} at={jump?.id === noteId ? jump : undefined}
     folderSuggestion={suggestedFolder ? { folder: suggestedFolder, dismiss: () => dismissFolderSuggestion(noteId) } : undefined} />
     : chatId !== undefined ? <ChatPage id={chatId} go={go} openSource={openSource} />
     : trash ? <Trash open={open} /> : folderScreen || <Home open={open} openFolder={(id) => go(`/folder/${id}`)} />
   return (
     <div data-testid="app-shell" className={`h-full text-ink ${ready ? 'bg-transparent' : 'bg-bg'}`}>
       {ready ? <Workspace route={route} meeting={meeting} folders={folders} go={go} back={history.current.length ? back : undefined} forward={future.current.length ? forward : undefined} search={() => setSearching(true)} collapsed={sidebarCollapsed} sidebarMotion={sidebarMotion} toggleSidebar={toggleSidebar}>{screen}</Workspace>
-        : <><TitleBar />{setup.phase === 'checking' && firstRunDone ? <BootScreen /> : <Onboarding state={setup} plan={plan} onDone={() => setPlan({ intro: false, steps: [] })} />}</>}
+        : <><TitleBar />{setup.phase === 'checking' && firstRunDone ? <BootScreen /> : <><button style={{ position: 'fixed', right: 20, top: 18, zIndex: 100 }} onClick={() => go('/projects')}>Project workflows & providers</button><Onboarding state={setup} plan={plan} onDone={() => setPlan({ intro: false, steps: [] })} /></>}</>}
       {ready && searching && <Search folder={folder} folders={folders} onOpen={open} onNavigate={go} onShortcuts={openShortcuts} onSettingsChange={() => setSettingsRevision((v) => v + 1)} onClose={() => setSearching(false)} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => toggleSidebar()} />}
       {ready && shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
       {ready && <TrashToast go={go} />}

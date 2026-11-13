@@ -7,6 +7,7 @@ const HELPERS = {
   'yogurt-mac': 'entitlements.mac-helper.plist',
   'whisper-server': 'entitlements.none.plist',
   'yogurt-mcp': 'entitlements.none.plist',
+  'yogurt-project-audio': 'entitlements.none.plist',
 }
 
 /** The entitlements file for a helper; null for everything else (Electron's own files) */

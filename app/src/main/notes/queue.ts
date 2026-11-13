@@ -5,7 +5,7 @@
  * meeting records, and gives way to anything else (run again after: what it did stays done).
  * folder: one folder proposal per meeting, with the same priority and recording policy as indexing.
  */
-export type JobKind = 'names' | 'enhance' | 'chat' | 'readahead' | 'index' | 'folder'
+export type JobKind = 'names' | 'enhance' | 'chat' | 'readahead' | 'index' | 'folder' | 'project'
 /** A job gets a signal: aborted when a recording starts on a small Mac. It is then run again from the start later. */
 export type Job = (signal: AbortSignal) => Promise<void>
 
@@ -58,6 +58,7 @@ export function createQueue(o: {
 
   const backlog = () => o.backlogMs?.() ?? 0
   const allowed = (kind: JobKind) => {
+    if (kind === 'project') return !o.recording() && backlog() === 0
     if (o.modelReady && !o.modelReady()) return false
     if ((kind === 'index' || kind === 'folder') && o.recording()) return false
     if (kind === 'readahead' && !o.smallMac && backlog() > READ_BACKLOG_MS) return false
@@ -85,7 +86,7 @@ export function createQueue(o: {
   const disarmIdle = () => { if (idleTimer) { clearTimeout(idleTimer); idleTimer = undefined } }
 
   /** a stopped job starts over later; a stopped read ahead is dropped (the next one reads what is new by then) */
-  const again = (e: Entry) => { if (e.cancelled || e.kind === 'readahead' || (e.meetingId && gone.has(e.meetingId))) e.resolve(); else waiting.unshift(e) }
+  const again = (e: Entry) => { if (e.cancelled || e.kind === 'readahead' || e.kind === 'project' || (e.meetingId && gone.has(e.meetingId))) e.resolve(); else waiting.unshift(e) }
 
   const pump = () => {
     watching()
@@ -150,6 +151,7 @@ export function createQueue(o: {
     },
     /** call when any recording starts or stops */
     recordingChanged() {
+      if (o.recording() && running?.entry.kind === 'project') running.abort.abort()
       if (o.recording()) disarmIdle()
       if (o.recording() && (running?.entry.kind === 'index' || running?.entry.kind === 'folder')) running.abort.abort()
       if (o.recording() && o.smallMac) {

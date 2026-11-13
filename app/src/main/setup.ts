@@ -16,6 +16,7 @@ export type SpeedDeps = {
 }
 
 export type SetupDeps = {
+  notesEnabled?: () => boolean
   getHardware(): Promise<Hardware>
   /** the catalog in this build; never waits on the network */
   getCatalog(): Promise<Catalog>
@@ -150,7 +151,7 @@ export class SetupController {
       const waitFor: Item[] = [asrItem(speed ? keep ?? candidates[0] : asr.model)]
       const total = waitFor.reduce((n, i) => n + i.bytes, 0)
       // room for the first notes model too, so it never runs out of disk after ready
-      await this.checkDisk([...waitFor, starterItem, embedItem])
+      await this.checkDisk(this.deps.notesEnabled?.() === false ? waitFor : [...waitFor, starterItem, embedItem])
 
       let done = 0
       const report = (item: Item, fraction: number) => this.set({ phase: 'downloading', fraction: Math.min(1, (done + item.bytes * fraction) / total) })
@@ -216,6 +217,7 @@ export class SetupController {
    * meanwhile get their notes then). The bigger one follows.
    */
   private startNotes(first: Item, embed: Item, later: Item | undefined) {
+    if (this.deps.notesEnabled?.() === false) return
     this.background = (async () => {
       const waits = this.deps.notesRetryMs ?? NOTES_RETRY_MS
       // Waiting notes show whole percents; every 10% goes in the log.

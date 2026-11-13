@@ -481,3 +481,12 @@ describe('the speed check (Windows and Linux): speech models timed on this compu
     expect(s.timed).toEqual([])
   })
 })
+
+
+it('external summaries download speech only, without local summary or embedding weights', async () => {
+  const { c, rec } = setup({ notesEnabled: () => false })
+  await c.start(); await c.idle()
+  expect(c.state.phase).toBe('ready')
+  expect(rec.asked).toEqual([turboUrl])
+  expect(c.installed()?.llm).toBeUndefined()
+})

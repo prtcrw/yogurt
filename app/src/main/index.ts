@@ -1,3 +1,4 @@
+import { hookProjects } from './projects/ipc'
 import { matchSearchPeople, searchPersonKey } from '../shared/searchPeople'
 import { resolvePeople } from './people'
 import { createFolderSuggestions } from './folderSuggestions'
@@ -81,7 +82,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: AUDIO_SCHEME, privileges: { stan
 
 app.setName('Yogurt')
 // Windows shows notifications only for an app with this id (the installer's shortcut carries the same one, electron-builder appId)
-if (process.platform === 'win32') app.setAppUserModelId('so.yogurt.app')
+if (process.platform === 'win32') app.setAppUserModelId('so.yogurt.projects')
 app.setPath('userData', userDataDir())
 mkdirSync(userDataDir(), { recursive: true })
 logToFile(join(userDataDir(), 'logs', 'main.log'))
@@ -163,6 +164,10 @@ function createSetup(): SetupController {
     // Windows and Linux: the notes engine checks the graphics first (a Mac shares its memory with them, no check)
     getHardware: isFake() ? () => fakeHardware(platform) : async () => toHardware(await readSysInfo(userDataDir()), process.platform === 'darwin' ? undefined : await probeGpu()),
     // the one in this build: new models come with app updates
+    notesEnabled: () => {
+      const file = join(userDataDir(), 'projects/preferences.json')
+      try { return !JSON.parse(readFileSync(file, 'utf8')).external } catch { return true }
+    },
     getCatalog: async () => loadCatalog({ bundled: bundledCatalog, licenses }),
     download: isFake() ? fakeDownloadDeps({ stepMs: Number(process.env.YOGURT_FAKE_STEP_MS ?? 5), notesMs: Number(process.env.YOGURT_FAKE_NOTES_MODEL_MS ?? 0) }) : realDeps,
     ...(isFake() ? { sha256Override: 'FAKE' } : {}),
@@ -555,8 +560,19 @@ app.whenReady().then(() => {
   // first run: the notes model lands after recording already works; jobs wait in the queue for it
   // the embedding model (meaning search across meetings) runs in the same worker and is let go with the notes model
   const embedder = createEmbedder({ engine, modelPath: () => setup.installed()?.embed, id: bundledCatalog.embedding.id, dims: bundledCatalog.embedding.dims })
-  const queue = createQueue({ recording: () => !!activeMeeting(), smallMac, backlogMs: transcriptionBacklogMs, onIdle: () => { void model.unload(); void embedder.unload() }, modelReady: () => !!setup.installed()?.llm })
+  const queue = createQueue({ recording: () => !!activeMeeting(), smallMac, backlogMs: transcriptionBacklogMs, onIdle: () => { void model.unload(); void embedder.unload() }, modelReady: () => projectWorkflows.externalSelected() || !!setup.installed()?.llm })
   setup.onNotesModel(() => { queue.modelArrived(); conversations.refresh() })
+  const projectWorkflows = hookProjects({ db: store.db, directory: join(userDataDir(), 'projects'), model, queue, fake: isFake(), unload: async () => { await model.unload(); await embedder.unload() },
+    localSelected: () => { if (!setup.installed()?.llm) void setup.start() },
+    asrModel: () => setup.installed()?.asr, recording: () => !!activeMeeting(),
+    changed: () => win?.webContents.send('projects:changed'),
+    meeting: id => {
+      const m = store.meeting(id)
+      if (!m || m.state !== 'done' || m.trashedAt) throw new Error('Choose a finished meeting')
+      return { title: m.title, segments: store.segments(id).filter(s => !s.hidden).map((s, i) => ({ id: `S${String(i + 1).padStart(5, '0')}`, startMs: s.startMs, endMs: s.endMs, text: s.text, speaker: s.speaker })),
+        audio: ['me.m4a', 'them.m4a', 'me.ogg', 'them.ogg'].map(file => join(userDataDir(), 'meetings', id, file)).filter(existsSync) }
+    } })
+  app.once('will-quit', () => projectWorkflows.dispose())
   // chat across meetings: every finished meeting chunked and embedded in the background, last in the queue
   const library = new Library(store.db)
   const indexer = createIndexer({ store, library, embedder, queue })
@@ -566,15 +582,15 @@ app.whenReady().then(() => {
   onMeetingStop(() => queue.recordingChanged())
   // the meeting is read into the model as it happens, so its notes start within seconds of stopping
   const readAhead = hookReadAhead({
-    store, queue, model, live: readsAhead, backlogMs: transcriptionBacklogMs, language: meetingLanguage,
+    store, queue, model: projectWorkflows.model, live: readsAhead && !projectWorkflows.externalSelected(), backlogMs: transcriptionBacklogMs, language: meetingLanguage,
     transcribed: async (id) => { await recordingFinished(id); await transcriptFinished(id) }, onStart: onMeetingStart, onStop: onMeetingStop,
   })
-  const folderSuggestions = createFolderSuggestions({ store, queue, model, changed: () => win?.webContents.send('folders:changed') })
+  const folderSuggestions = createFolderSuggestions({ store, queue, model: projectWorkflows.model, changed: () => win?.webContents.send('folders:changed') })
   const notes = hookNotes({
     summarized: id => folderSuggestions.schedule(id),
     // Windows and Linux: a note waiting while the model loads says so (a Mac shows what it always did)
     showLoading: platform !== 'darwin',
-    store, queue, model, language: meetingLanguage, onStop: onMeetingStopSaved, named: (id) => callNames.finished(id), earlier: (id) => readAhead.parts(id), me,
+    store, queue, model: projectWorkflows.model, language: meetingLanguage, onStop: onMeetingStopSaved, named: (id) => callNames.finished(id), earlier: (id) => readAhead.parts(id), me,
     transcribed: async (id) => { await recordingFinished(id); await transcriptFinished(id) },
     send: (v) => win?.webContents.send('notes:changed', v),
     // the notes are written: the meeting goes into the library for chat across meetings
@@ -615,7 +631,7 @@ app.whenReady().then(() => {
   })
   // Both Ask surfaces share saved conversations and the same recording-first model queue.
   const conversations = hookConversations({
-    store, library, indexer, embedder, queue, model,
+    store, library, indexer, embedder, queue, model: projectWorkflows.model,
     send: (v) => {
       win?.webContents.send('conversations:changed', v)
       if (v.chips.length === 1 && v.chips[0].kind === 'meeting') win?.webContents.send('chat:changed', { ...v, meetingId: v.chips[0].id })
@@ -941,7 +957,7 @@ app.whenReady().then(() => {
   const updatesAvailable = updatesOn({ packaged: app.isPackaged, fake: isFake(), profile: !!process.env.YOGURT_USER_DATA, platform: process.platform, appImage: !!process.env.APPIMAGE,
     feed: app.isPackaged && existsSync(join(process.resourcesPath, 'app-update.yml')),
     preview: app.isPackaged && isPreviewBuild((() => { try { return readFileSync(join(app.getAppPath(), 'package.json'), 'utf8') } catch { return '' } })()) })
-  hookUpdates({ file: join(userDataDir(), 'settings.json'), available: updatesAvailable, recording: () => !!activeMeeting(), onCall: () => onCall(),
+  hookUpdates({ file: join(userDataDir(), 'settings.json'), available: false, recording: () => !!activeMeeting(), onCall: () => onCall(),
     // fake mode: a test pretends a version downloaded, and how long it waits before the corner offers Restart
     fake: isFake() && process.env.YOGURT_FAKE_UPDATE ? { version: process.env.YOGURT_FAKE_UPDATE, afterMs: Number(process.env.YOGURT_FAKE_UPDATE_AFTER_MS ?? 0), restarted: () => { updateRestarts++ } } : undefined })
     .catch((err) => console.warn("couldn't start looking for new versions", err))

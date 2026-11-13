@@ -4,6 +4,23 @@ import { capabilities, platformOf } from '../shared/platform'
 import type { ChatView, ConversationSummary, ConversationView, NoteView, PromptAction, SetupState, UpdateStatus, WidgetView, YogurtApi } from '../shared/types'
 
 const api: YogurtApi = {
+  projects: {
+    state: () => ipcRenderer.invoke('projects:state'),
+    defaultProvider: id => ipcRenderer.invoke('projects:default', id),
+    chooseFolder: () => ipcRenderer.invoke('projects:folder'),
+    save: p => ipcRenderer.invoke('projects:save', p),
+    credential: (provider, key) => ipcRenderer.invoke('projects:credential', provider, key),
+    import: id => ipcRenderer.invoke('projects:import', id),
+    cancel: id => ipcRenderer.invoke('projects:cancel', id),
+    summarize: id => ipcRenderer.invoke('projects:summarize', id),
+    speakers: (id, map) => ipcRenderer.invoke('projects:speakers', id, map),
+    enroll: (id, speaker, name) => ipcRenderer.invoke('projects:enroll', id, speaker, name),
+    exportMeeting: (projectId, meetingId) => ipcRenderer.invoke('projects:meeting', projectId, meetingId),
+    sample: (id, cluster) => ipcRenderer.invoke('projects:sample', id, cluster),
+    open: (id, kind) => ipcRenderer.invoke('projects:open', id, kind),
+    forget: id => ipcRenderer.invoke('projects:forget', id),
+    onChange: cb => { const f = () => cb(); ipcRenderer.on('projects:changed', f); return () => ipcRenderer.off('projects:changed', f) },
+  },
   platform: process.platform,
   os: platformOf(process.platform, process.env),
   capabilities: capabilities(platformOf(process.platform, process.env)),

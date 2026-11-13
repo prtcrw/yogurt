@@ -56,12 +56,13 @@ export function Workspace({ route, meeting, folders, go, back, forward, search, 
     { route: '', label: t('Meetings'), Icon: FileText },
     { route: '/chat', label: t('Ask'), Icon: MessageCircle },
     { route: '/trash', label: t('Trash'), Icon: Trash2 },
+    { route: '/projects', label: 'Project workflows', Icon: FileText },
     { route: '/settings', label: t('Settings'), Icon: Settings },
   ]
   const folder = route.startsWith('/folder/') ? folders?.find((s) => route === `/folder/${s.id}`) : undefined
   const current = links.find((link) => link.route === section) ?? (route.startsWith('/folder/') ? { label: folder?.name ?? t('Folder') } : undefined)
   const label = note ? (meeting && route === `/note/${meeting.id}` ? meeting.title : t('Meeting')) : route === '/settings' ? t('Settings') : current?.label ?? t('Meetings')
-  const nav = (link: typeof links[number]) => <button key={link.route} data-testid={link.route === '' ? 'nav-home' : link.route === '/chat' ? 'nav-chat' : link.route === '/settings' ? 'settings-open' : 'nav-trash'}
+  const nav = (link: typeof links[number]) => <button key={link.route} data-testid={link.route === '' ? 'nav-home' : link.route === '/chat' ? 'nav-chat' : link.route === '/settings' ? 'settings-open' : link.route === '/projects' ? 'nav-projects' : 'nav-trash'}
     data-sidebar="menu-button" aria-label={link.label} title={collapsed ? link.label : undefined} className={`workspace-nav${link.route === '/trash' ? ' workspace-trash' : ''}`} aria-current={section === link.route || link.route === '' && route === '/meetings' ? 'page' : undefined} onClick={() => go(link.route)}>
     <link.Icon size={16} strokeWidth={1.75} aria-hidden="true" /><span>{link.label}</span>
   </button>

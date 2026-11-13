@@ -1,0 +1,54 @@
+import { DatabaseSync } from 'node:sqlite'
+import { randomUUID } from 'node:crypto'
+import { realpathSync } from 'node:fs'
+import { isAbsolute, relative, sep } from 'node:path'
+import type { Project, ProjectJob, VoiceProfile } from '../../shared/projects'
+import { inside } from './files'
+export class ProjectStore {
+  constructor(readonly db: DatabaseSync) {
+    db.exec(`CREATE TABLE IF NOT EXISTS project_workspaces(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS project_jobs(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, fingerprint TEXT NOT NULL, payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS project_voices(id TEXT PRIMARY KEY, payload TEXT NOT NULL);`)
+  }
+  projects(): Project[] { return this.db.prepare('SELECT payload FROM project_workspaces ORDER BY rowid').all().map(r => JSON.parse(String(r.payload))) }
+  jobs(): ProjectJob[] { return this.db.prepare('SELECT payload FROM project_jobs ORDER BY rowid DESC').all().map(r => JSON.parse(String(r.payload))) }
+  profiles(): VoiceProfile[] { return this.db.prepare('SELECT payload FROM project_voices').all().map(r => JSON.parse(String(r.payload))) }
+  project(id: string): Project { const p = this.projects().find(p => p.id === id); if (!p) throw new Error('Choose a project'); return p }
+  job(id: string): ProjectJob { const job = this.jobs().find(j => j.id === id); if (!job) throw new Error('Job not found'); return job }
+  save(p: Project): Project {
+    if (!p.name?.trim() || p.name.length > 200) throw new Error('Enter a project name')
+    if (!['local', 'codex', 'claude', 'openai', 'anthropic', 'compatible'].includes(p.provider)) throw new Error('Choose a summary provider')
+    if (!['reference', 'archive', 'delete'].includes(p.retention)) throw new Error('Choose an audio policy')
+    p = { ...p, id: p.id || randomUUID(), vault: realpathSync(p.vault), folder: p.folder || '.', output: p.output || 'Meetings' }
+    if (isAbsolute(p.folder) || isAbsolute(p.output)) throw new Error('Project/output paths must be relative to the vault')
+    const root = inside(p.vault, p.folder), output = inside(root, p.output)
+    if (root === output) throw new Error('Choose a separate meeting output subfolder')
+    if (!Array.isArray(p.contextFolders) || p.contextFolders.some(f => typeof f !== 'string' || isAbsolute(f))) throw new Error('Context folders must be project-relative paths')
+    p.contextFolders = [...new Set(p.contextFolders.map(f => f.trim()).filter(Boolean))]
+    for (const f of p.contextFolders) inside(root, f)
+    if (p.retention === 'archive') {
+      if (!p.archive || !isAbsolute(p.archive)) throw new Error('Choose an external audio archive folder')
+      const archive = realpathSync(p.archive)
+      const rel = relative(p.vault, archive)
+      if (!rel || rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel)) throw new Error('Audio archive must be outside the Obsidian vault')
+      p.archive = archive
+    }
+    this.db.prepare('INSERT INTO project_workspaces VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(p.id, JSON.stringify(p))
+    return p
+  }
+  submit(projectId: string, source: string, fingerprint: string): ProjectJob {
+    this.project(projectId)
+    const previous = this.jobs().find(j => j.projectId === projectId && j.fingerprint === fingerprint && !['failed', 'cancelled'].includes(j.state))
+    if (previous) return previous
+    const job: ProjectJob = { id: randomUUID(), projectId, source, fingerprint, created: Date.now(), updated: Date.now(), state: 'queued', stage: 'queued' }
+    this.db.prepare('INSERT INTO project_jobs VALUES(?,?,?,?)').run(job.id, projectId, fingerprint, JSON.stringify(job))
+    return job
+  }
+  update(id: string, patch: Partial<ProjectJob>): ProjectJob {
+    const previous = this.job(id)
+    const job = { ...previous, ...patch, id: previous.id, projectId: previous.projectId, updated: Date.now() }
+    this.db.prepare('UPDATE project_jobs SET payload=? WHERE id=?').run(JSON.stringify(job), id)
+    return job
+  }
+  voice(profile: VoiceProfile) { this.db.prepare('INSERT INTO project_voices VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(profile.id, JSON.stringify(profile)) }
+}

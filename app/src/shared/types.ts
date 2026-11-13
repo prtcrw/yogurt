@@ -20,6 +20,7 @@ export type MeetingCard = StoredMeetingCard & { paused?: true }
 
 /** What the window sees of the app: window.yogurt (the preload bridge, contextIsolation on) */
 export type YogurtApi = {
+  projects: import('./projects').ProjectsApi
   platform: NodeJS.Platform
   /** the computer the screens are for: the real one, or in fake mode the one YOGURT_FAKE_PLATFORM pretends to be (shortcut keys follow it) */
   os: string

@@ -1,5 +1,5 @@
 // Builds the helpers for this computer into resources/bin.
-// Mac: scripts/native.sh, unchanged.
+// Mac: scripts/native.sh plus the optional project audio/speaker helper.
 // Windows and Linux: the Rust helpers (recorder, system helper, AI apps relay) with cargo, then whisper-server and the
 // VAD model (scripts/whisper-build.mjs). YOGURT_NO_WHISPER=1 leaves whisper-server out (CI's fake-mode tests don't use it).
 // Needs Rust (each crate's rust-toolchain.toml pins the version), CMake, and on Linux libpulse-dev and pkg-config.
@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 if (process.platform === 'darwin') {
   const r = spawnSync('sh', [join(here, 'native.sh')], { stdio: 'inherit' })
-  process.exit(r.status ?? 1)
+  if (r.status !== 0) process.exit(r.status ?? 1)
+  const project = spawnSync('bash', [join(here, 'project-audio-build.sh')], { stdio: 'inherit' })
+  process.exit(project.status ?? 1)
 }
 if (process.platform !== 'win32' && process.platform !== 'linux') {
   console.log(`no helpers for ${process.platform}`)

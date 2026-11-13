@@ -20,11 +20,11 @@ describe('the catalog', () => {
 /** every file under a folder */
 const files = (dir: string): string[] => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? files(join(dir, f)) : [join(dir, f)]))
 
-describe('nothing leaves the Mac', () => {
-  it('only model downloads (pinned URLs) and whisper-server on 127.0.0.1 make requests; the update check is electron-updater', () => {
+describe('explicit network boundaries', () => {
+  it('requests stay in model downloads, localhost ASR and the explicitly selected summary provider', () => {
     const src = join(__dirname, '../src')
     // files allowed to make requests: model downloads from the catalog's pinned URLs, whisper-server on 127.0.0.1
-    const allowed = new Set(['main/downloader.ts', 'main/asr/server.ts', 'main/asr/transcribe.ts'])
+    const allowed = new Set(['main/downloader.ts', 'main/asr/server.ts', 'main/asr/transcribe.ts', 'main/projects/providers.ts'])
     const calls = files(src).filter((f) => /\.(ts|tsx)$/.test(f))
       .filter((f) => /(?<![.\w]|async )fetch\(|(\?\?|=) fetch\b|net\.request|from 'node:https?'|require\('https?'\)|new WebSocket|XMLHttpRequest|raw\.githubusercontent/.test(readFileSync(f, 'utf8')))
       .map((f) => f.slice(src.length + 1).replaceAll('\\', '/'))

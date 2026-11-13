@@ -50,3 +50,6 @@ site/.vercel/
 # written by next dev
 site/AGENTS.md
 site/CLAUDE.md
+
+# Swift package build products
+app/native/yogurt-project-audio/.build/
