@@ -1,17 +1,18 @@
 import { dialog, ipcMain, safeStorage, shell } from 'electron'
 import { existsSync, readFileSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Project, ProviderKind } from '../../shared/projects'
 import type { Queue } from '../notes/queue'
 import type { NotesModel } from '../notes/model'
 import { ProjectStore } from './store'
 import { Workflows } from './workflow'
-import { atomic } from './files'
+import { atomic, inside } from './files'
+import { ProjectInbox } from './inbox'
 import { selectedNotesModel } from './selection'
 import { externalGenerator } from './providers'
 
-export function hookProjects(d: { db: DatabaseSync; directory: string; model: NotesModel; queue: Queue; unload(): Promise<void>; localSelected?(): void; fake?: boolean; asrModel(): string | undefined;
+export function hookProjects(d: { db: DatabaseSync; directory: string; workDirectory?: string; voiceDirectory?: string; executables?: { codexBinary?: string; claudeBinary?: string; ffmpegBinary?: string }; model: NotesModel; queue: Queue; unload(): Promise<void>; localSelected?(): void; fake?: boolean; asrModel(): string | undefined;
   changed(): void; recording(): boolean; meeting(id: string): { title: string; segments: import('../../shared/projects').ProjectSegment[]; audio: string[] } }) {
   const store = new ProjectStore(d.db)
   mkdirSync(d.directory, { recursive: true, mode: 0o700 })
@@ -21,7 +22,7 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; model: No
     const encoded = readSecrets()[provider]
     return encoded ? safeStorage.decryptString(Buffer.from(encoded, 'base64')) : undefined
   }
-  const external = d.fake ? async (_project: Project, prompt: string, signal: AbortSignal) => (await d.model.llm(signal)).chat(prompt, () => {}, { temperature: 0 }) : externalGenerator(getKey)
+  const external = d.fake ? async (_project: Project, prompt: string, signal: AbortSignal) => (await d.model.llm(signal)).chat(prompt, () => {}, { temperature: 0 }) : externalGenerator(getKey, fetch, d.executables)
   const preference = join(d.directory, 'preferences.json')
   const defaultProject = () => {
     if (!existsSync(preference)) return undefined
@@ -35,7 +36,7 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; model: No
     if (p.provider === 'local') d.localSelected?.()
     d.queue.modelArrived(); d.changed()
   })
-  const workflow = new Workflows({ store, directory: join(d.directory, 'jobs'), changed: d.changed, asrModel: d.asrModel,
+  const workflow = new Workflows({ store, directory: d.workDirectory || join(d.directory, 'jobs'), voiceDirectory: d.voiceDirectory, ffmpegBinary: d.executables?.ffmpegBinary, changed: d.changed, asrModel: d.asrModel,
     execution: async (run, stop) => {
       await d.queue.enqueue(async signal => {
         const abort = () => stop.abort()
@@ -45,6 +46,7 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; model: No
       }, 'project')
       if (stop.signal.aborted) throw new Error('Cancelled')
     },
+    ...(d.fake ? { transcribe: async () => [{ id: 'S00001', startMs: 0, endMs: 3000, text: 'This is a development recording for workflow verification.', speaker: null }] } : {}),
     recording: d.recording, generate: async (project, prompt, signal) => {
       if (d.fake) {
         if (prompt.startsWith('Choose the most useful')) return JSON.stringify({ kind: 'none', reason: 'Development fixture; no follow-up selected.', draft: '', sources: [] })
@@ -56,12 +58,13 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; model: No
       const llm = await d.model.llm(signal)
       return llm.chat(prompt, () => {}, { temperature: 0, maxTokens: 4096 })
     } })
-  ipcMain.handle('projects:state', () => ({ projects: store.projects(), jobs: store.jobs(), profiles: store.profiles(), configured: Object.keys(readSecrets()), defaultProjectId: defaultProject()?.id }))
+  const inbox = new ProjectInbox(store, d.changed)
+  ipcMain.handle('projects:state', () => ({ inbox: inbox.pending(), inboxErrors: inbox.errors, projects: store.projects(), jobs: store.jobs(), profiles: store.profiles(), configured: Object.keys(readSecrets()), defaultProjectId: defaultProject()?.id }))
   ipcMain.handle('projects:folder', async () => {
     const result = await dialog.showOpenDialog({ title: 'Choose a project, Obsidian vault, or external audio archive', properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
   })
-  ipcMain.handle('projects:save', (_e, p: Project) => { const saved = store.save(p); d.changed(); return saved })
+  ipcMain.handle('projects:save', async (_e, p: Project) => { const saved = store.save(p); if (defaultProject()?.id === saved.id) await atomic(preference, JSON.stringify({ defaultProjectId: saved.id, external: saved.provider !== 'local' })); void inbox.scan(); d.changed(); return saved })
   ipcMain.handle('projects:credential', async (_e, provider: ProviderKind, key: string) => {
     if (!['openai', 'anthropic', 'compatible'].includes(provider) || typeof key !== 'string' || key.length > 2000) throw new Error('Invalid provider key')
     if (!safeStorage.isEncryptionAvailable() || safeStorage.getSelectedStorageBackend?.() === 'basic_text') throw new Error('OS-backed credential storage is unavailable. Use a local model or signed-in CLI instead.')
@@ -70,9 +73,32 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; model: No
     await atomic(secrets, JSON.stringify(values)); d.changed()
   })
   ipcMain.handle('projects:import', async (_e, id: string) => {
-    store.project(id)
-    const result = await dialog.showOpenDialog({ title: 'Import an existing recording', properties: ['openFile'], filters: [{ name: 'Audio or video', extensions: ['mp4', 'mov', 'mkv', 'webm', 'wav', 'mp3', 'm4a', 'aac', 'flac', 'aiff', 'ogg'] }] })
+    const project = store.project(id)
+    const result = await dialog.showOpenDialog({ defaultPath: project.input || undefined, title: 'Import an existing recording', properties: ['openFile'], filters: [{ name: 'Audio or video', extensions: ['mp4', 'mov', 'mkv', 'webm', 'wav', 'mp3', 'm4a', 'aac', 'flac', 'aiff', 'ogg'] }] })
     return result.canceled ? null : workflow.import(id, result.filePaths[0])
+  })
+  ipcMain.handle('projects:importMany', async (_e, id: string) => {
+    const project = store.project(id)
+    const result = await dialog.showOpenDialog({ defaultPath: project.input || undefined, title: 'Import recordings', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Audio or video', extensions: ['mp4', 'mov', 'mkv', 'webm', 'wav', 'mp3', 'm4a', 'aac', 'flac', 'aiff', 'ogg'] }] })
+    const jobs = []
+    if (!result.canceled) for (const path of result.filePaths) jobs.push(await workflow.import(id, path))
+    return jobs
+  })
+  ipcMain.handle('projects:check', () => inbox.scan())
+  ipcMain.handle('projects:approve', async (_e, id: string) => {
+    const item = await inbox.current(id)
+    const job = await workflow.import(item.projectId, item.source)
+    inbox.resolve(id, 'imported'); return job
+  })
+  ipcMain.handle('projects:ignore', (_e, id: string) => inbox.resolve(id, 'ignored'))
+  ipcMain.handle('projects:retry', (_e, id: string) => workflow.retry(id))
+  ipcMain.handle('projects:projectFolder', async (_e, project: Project, kind: string) => {
+    if (!['project', 'output'].includes(kind)) throw new Error('Unknown folder setting')
+    const root = kind === 'project' ? project.vault : inside(project.vault, project.folder)
+    const result = await dialog.showOpenDialog({ title: kind === 'project' ? 'Choose project folder within the vault' : 'Choose output folder within this project', defaultPath: root, properties: ['openDirectory', 'createDirectory'] })
+    if (result.canceled) return null
+    const path = inside(root, result.filePaths[0])
+    return relative(root, path) || '.'
   })
   ipcMain.handle('projects:cancel', (_e, id: string) => workflow.cancel(id))
   ipcMain.handle('projects:summarize', (_e, id: string) => workflow.summarize(id))
@@ -100,6 +126,8 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; model: No
   })
   ipcMain.handle('projects:forget', (_e, id: string) => { store.db.prepare('DELETE FROM project_voices WHERE id=?').run(id); d.changed() })
   const timer = setInterval(() => workflow.resumeQueue(), 3000)
+  const inboxTimer = setInterval(() => { void inbox.scan() }, 10000)
+  void inbox.scan()
   workflow.resumeQueue()
-  return { model, externalSelected: () => !!defaultProject() && defaultProject()?.provider !== 'local', dispose: () => { clearInterval(timer); workflow.dispose() } }
+  return { model, externalSelected: () => !!defaultProject() && defaultProject()?.provider !== 'local', dispose: () => { clearInterval(timer); clearInterval(inboxTimer); workflow.dispose() } }
 }

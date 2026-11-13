@@ -27,10 +27,10 @@ export async function helper(args: string[], signal: AbortSignal) {
   })
 }
 /** AVFoundation handles common Mac formats; an optional installed FFmpeg adds other containers/codecs. */
-export async function decodeFile(source: string, wav: string, signal: AbortSignal) {
+export async function decodeFile(source: string, wav: string, signal: AbortSignal, ffmpegBinary?: string) {
   try { await helper(['decode', source, wav], signal); return } catch (error) {
     if (signal.aborted) throw error
-    const binary = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(existsSync) ?? 'ffmpeg'
+    const binary = ffmpegBinary || (['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(existsSync) ?? 'ffmpeg')
     await new Promise<void>((resolve, reject) => {
       const child = spawn(binary, ['-nostdin', '-v', 'error', '-y', '-i', source, '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-acodec', 'pcm_s16le', '-f', 'wav', '-write_bext', '0', '-bitexact', wav], { stdio: ['ignore', 'ignore', 'pipe'], signal })
       let message = ''
@@ -41,10 +41,10 @@ export async function decodeFile(source: string, wav: string, signal: AbortSigna
   }
 }
 export async function transcribeFile(source: string, wav: string, model: string, signal: AbortSignal,
-  progress: (value: string) => void): Promise<ProjectSegment[]> {
-  progress('Decoding recording'); await decodeFile(source, wav, signal)
+  progress: (value: string) => void, options: { ffmpegBinary?: string; language?: string } = {}): Promise<ProjectSegment[]> {
+  progress('Decoding recording'); await decodeFile(source, wav, signal, options.ffmpegBinary)
   const server = createWhisperServer({ binary: whisperServerPath(), model, vadModel: vadModelPath() })
-  const transcribe = createTranscriber({ url: () => server.url() })
+  const transcribe = createTranscriber({ url: () => server.url(), language: () => options.language || 'auto' })
   const file = await open(wav, 'r')
   const abort = () => server.kill()
   signal.addEventListener('abort', abort, { once: true })

@@ -20,6 +20,7 @@ export type MeetingCard = StoredMeetingCard & { paused?: true }
 
 /** What the window sees of the app: window.yogurt (the preload bridge, contextIsolation on) */
 export type YogurtApi = {
+  runtime: import('./runtime').RuntimeApi
   projects: import('./projects').ProjectsApi
   platform: NodeJS.Platform
   /** the computer the screens are for: the real one, or in fake mode the one YOGURT_FAKE_PLATFORM pretends to be (shortcut keys follow it) */
@@ -296,7 +297,7 @@ export type YogurtApi = {
 
 /** First-run setup: the models this Mac needs. Ready (recording works) once the speech model is in place; the notes models keep downloading after. */
 export type SetupState = {
-  phase: 'checking' | 'downloading' | 'ready' | 'error'
+  phase: 'models' | 'checking' | 'downloading' | 'ready' | 'error'
   /** 0 to 1 over what ready waits for */
   fraction: number
   message?: string

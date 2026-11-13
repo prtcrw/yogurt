@@ -89,3 +89,14 @@ it('live exports keep all audio track links and the meeting title, and do not re
   f.store.update(job.id, { state: 'completed' }); expect((await workflows.fromMeeting(f.project.id, 'Ontology review', [segment], [a, b])).state).toBe('completed')
   workflows.dispose(); f.db.close()
 })
+
+it('a retry uses saved speech and honors a disabled follow-up without rerunning ASR or retention', async () => {
+  const f = await fixture(), source = join(f.root, 'call.wav'); await writeFile(source, 'source'); const hash = await sha256(source)
+  const p = f.store.save({ ...f.project, followUps: false, retention: 'delete' }), job = f.store.submit(p.id, source, 'retry')
+  f.store.update(job.id, { projectSnapshot: p, sourceHash: hash, segments: [segment], state: 'failed', retained: true, audioUri: 'file:///deleted/call.wav', audioStatus: 'deleted' }); await rm(source)
+  let calls = 0
+  const workflows = new Workflows({ store: f.store, directory: join(f.root, 'jobs'), changed: () => {}, asrModel: () => undefined, transcribe: async () => { throw new Error('ASR must not run again') }, generate: async () => { calls++; return result } })
+  workflows.retry(job.id); expect(f.store.job(job.id).state).toBe('review'); workflows.summarize(job.id)
+  await expect.poll(() => f.store.job(job.id).state).toBe('completed'); expect(calls).toBe(1)
+  expect(await readFile(f.store.job(job.id).transcript!, 'utf8')).toContain('audio_status: "deleted"'); workflows.dispose(); f.db.close()
+})

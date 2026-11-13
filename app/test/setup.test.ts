@@ -490,3 +490,34 @@ it('external summaries download speech only, without local summary or embedding 
   expect(rec.asked).toEqual([turboUrl])
   expect(c.installed()?.llm).toBeUndefined()
 })
+
+it('uses an existing Whisper model without downloading another speech model', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'yogurt-custom-model-')), path = join(root, 'speech.bin')
+  const header = Buffer.alloc(8); header.writeUInt32LE(0x67676d6c); writeFileSync(path, header)
+  const { c, rec } = setup({ customModels: { asr: path }, notesEnabled: () => false })
+  await c.start(); await c.idle(); expect(c.state.phase).toBe('ready'); expect(c.installed()?.asr).toBe(path); expect(rec.asked).toEqual([])
+})
+it('custom summary GGUF suppresses both automatic summary model downloads', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'yogurt-custom-summary-')), path = join(root, 'summary.gguf'); writeFileSync(path, 'GGUFtest')
+  const { c, rec } = setup({ customModels: { llm: path } }); await c.start(); await c.idle()
+  expect(c.installed()?.llm).toBe(path); expect(rec.asked).not.toContain(starterUrl); expect(rec.asked).not.toContain(bigUrl); expect(rec.asked).toContain(embedUrl)
+})
+it('a configured missing model is a visible error instead of silently downloading a replacement', async () => {
+  const { c, rec, root } = setup(); const other = setup({ customModels: { asr: join(root, 'missing.bin') } }); await other.c.start()
+  expect(other.c.state).toMatchObject({ phase: 'error' }); expect(other.c.state.message).toContain('Configured speech model is unavailable'); expect(other.rec.asked).toEqual([])
+})
+
+it('downloads nothing until the first-run model choice is explicitly submitted', async () => {
+  let choose!: (value: {}) => void
+  const choice = new Promise<{}>(resolve => { choose = resolve })
+  const { c, rec } = setup({ modelSelectionRequired: () => true, selectModels: () => choice })
+  const running = c.start(); await vi.waitFor(() => expect(c.state.phase).toBe('models'))
+  expect(rec.asked).toEqual([]); choose({}); await running; await c.idle(); expect(c.state.phase).toBe('ready'); expect(rec.asked).toContain(turboUrl)
+})
+
+it('reuses a verified search model from the official Yogurt cache without copying or downloading it', async () => {
+  const shared = mkdtempSync(join(tmpdir(), 'yogurt-shared-models-')), dir = join(shared, 'embed'); mkdirSync(dir)
+  const filename = name(embedUrl); writeFileSync(join(dir, filename), 'existing weights'); writeFileSync(join(dir, filename + '.ok'), 'FAKE')
+  const { c, rec } = setup({ verifiedModelRoots: [shared] }); await c.start(); await c.idle()
+  expect(c.installed()?.embed).toBe(join(dir, filename)); expect(rec.asked).not.toContain(embedUrl)
+})

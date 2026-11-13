@@ -29,6 +29,7 @@ export function evidenceClaims(raw: string, segments: ProjectSegment[]): { claim
 export type WorkflowDeps = {
   store: ProjectStore; directory: string; changed(): void
   generate: Generate; asrModel(): string | undefined
+  voiceDirectory?: string; ffmpegBinary?: string
   transcribe?: typeof transcribeFile; voices?: typeof diarize
   recording?(): boolean
   execution?(run: () => Promise<void>, stop: AbortController): Promise<void>
@@ -73,6 +74,12 @@ export class Workflows {
     if (this.active?.id === id) throw new Error('This job is already running')
     this.update(id, { state: 'queued', stage: 'Summary queued', error: undefined }); this.pump()
   }
+  retry(id: string) {
+    const job = this.d.store.job(id)
+    if (!['failed', 'cancelled'].includes(job.state)) throw new Error('Only stopped jobs can be retried')
+    if (job.segments?.length) this.update(id, { state: 'review', error: undefined, stage: 'Review the saved transcript before summarizing again' })
+    else { this.update(id, { state: 'queued', error: undefined, stage: 'Retry queued' }); this.pump() }
+  }
   speakers(id: string, assignments: Record<string, string>) {
     const j = this.d.store.job(id)
     if (j.state !== 'review' && j.state !== 'failed') throw new Error('Wait until the job reaches review')
@@ -91,7 +98,7 @@ export class Workflows {
     const label = (job.title || basename(job.source, extname(job.source))).replace(/[^\p{L}\p{N}_-]+/gu, '-').slice(0, 60) || 'Meeting'
     return inside(root, join(p.output, `${new Date(job.created).toISOString().slice(0, 10)}_${label}_${job.id.slice(0, 8)}`))
   }
-  private async exportTranscript(job: ProjectJob, uri = job.audioSources?.length === 0 ? job.source : pathToFileURL(job.source).href, status = 'pending') {
+  private async exportTranscript(job: ProjectJob, uri = job.audioUri || (job.audioSources?.length === 0 ? job.source : pathToFileURL(job.source).href), status = job.audioStatus || 'pending') {
     const folder = this.output(job), target = join(folder, 'transcript.md')
     await atomic(target, transcriptMarkdown(job.title || basename(job.source), job.segments ?? [], uri, job.sourceHash ?? '', status, job.audioSources))
     this.update(job.id, { transcript: target, audioUri: uri })
@@ -117,19 +124,19 @@ export class Workflows {
     const progress = (stage: string) => { if (signal.aborted) throw new Error('Cancelled'); this.update(job.id, { stage }) }
     if (!job.segments?.length) {
       const model = this.d.asrModel(); if (!model) throw new Error('Finish Yogurt speech-model setup before importing media')
-      const cache = join(this.d.directory, 'transcripts', createHash('sha256').update((job.sourceHash ?? '') + model).digest('hex') + '.json')
+      const cache = join(this.d.directory, 'transcripts', createHash('sha256').update((job.sourceHash ?? '') + model + ':' + (p.speechLanguage || 'auto')).digest('hex') + '.json')
       try {
       let segments: ProjectSegment[]
       try { segments = JSON.parse(await readFile(cache, 'utf8')); progress('Reusing saved transcript') }
-      catch { segments = await (this.d.transcribe ?? transcribeFile)(job.source, wav, model, signal, progress); await atomic(cache, JSON.stringify(segments)) }
+      catch { segments = await (this.d.transcribe ?? transcribeFile)(job.source, wav, model, signal, progress, { language: p.speechLanguage || 'auto', ffmpegBinary: this.d.ffmpegBinary }); await atomic(cache, JSON.stringify(segments)) }
       this.update(job.id, { segments })
       await this.exportTranscript(this.d.store.job(job.id))
       if (p.recognizeSpeakers) {
         try {
         progress('Recognizing speakers · first use downloads the optional voice models')
         // A cache hit may not have decoded audio on disk yet.
-        try { await access(wav) } catch { await decodeFile(job.source, wav, signal) }
-        const turns = await (this.d.voices ?? diarize)(wav, join(folder, 'voices.json'), join(this.d.directory, 'voice-models'), signal)
+        try { await access(wav) } catch { await decodeFile(job.source, wav, signal, this.d.ffmpegBinary) }
+        const turns = await (this.d.voices ?? diarize)(wav, join(folder, 'voices.json'), this.d.voiceDirectory || join(this.d.directory, 'voice-models'), signal)
         const embeddings: Record<string, number[]> = {}, samples: Record<string, string> = {}
         await mkdir(join(folder, 'samples'), { recursive: true })
         for (const turn of [...turns].sort((a, b) => b.quality - a.quality)) if (turn.quality >= .5 && turn.endMs - turn.startMs >= 2000 && !embeddings[turn.speaker]) {
@@ -177,7 +184,7 @@ export class Workflows {
     await atomic(join(out, 'review.md'), '# Review\n\n- Exact evidence quotes were verified. Interpretations and speaker identity still need review.\n' + review.map(s => `- ${s}`).join('\n') + '\n')
     await atomic(join(out, 'context.json'), JSON.stringify(docs, null, 2))
     progress('Choosing a follow-up from the meeting context')
-    const choiceText = await this.d.generate(p, 'Choose the most useful follow-up based on this meeting and its project background. Do not force tasks onto every meeting. Return JSON {"kind":"next-meeting|project-update|research|implementation|reference-notes|other|none","reason":"why this fits","draft":"Markdown draft or empty for none","sources":["S00001"]}. This is a proposed future-work draft, not an assertion that the meeting agreed to it. Reference only provided segment IDs. Never execute actions or modify existing project files.\n' + JSON.stringify({ claims, context: docs }), signal)
+    const choiceText = p.followUps === false ? JSON.stringify({ kind: 'none', reason: 'Follow-up suggestions are disabled for this project.', draft: '', sources: [] }) : await this.d.generate(p, 'Choose the most useful follow-up based on this meeting and its project background. Do not force tasks onto every meeting. Return JSON {"kind":"next-meeting|project-update|research|implementation|reference-notes|other|none","reason":"why this fits","draft":"Markdown draft or empty for none","sources":["S00001"]}. This is a proposed future-work draft, not an assertion that the meeting agreed to it. Reference only provided segment IDs. Never execute actions or modify existing project files.\n' + JSON.stringify({ claims, context: docs }), signal)
     const choice = JSON.parse(choiceText.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, ''))
     const sourceIds = new Set(job.segments.map(s => s.id))
     if (!['next-meeting', 'project-update', 'research', 'implementation', 'reference-notes', 'other', 'none'].includes(choice.kind)
@@ -190,11 +197,11 @@ export class Workflows {
     progress('Applying audio retention')
     // Existing live Yogurt recordings stay in Yogurt: deletion/archiving belongs to its recording lifecycle.
     const live = job.audioSources !== undefined
-    const retained = live ? { uri: job.audioSources?.[0] ? pathToFileURL(job.audioSources[0]).href : job.source, status: 'external' }
+    const retained = job.retained && job.audioUri ? { uri: job.audioUri, status: job.audioStatus || (live || p.retention === 'reference' ? 'external' : p.retention === 'archive' ? 'archived' : 'deleted') } : live ? { uri: job.audioSources?.[0] ? pathToFileURL(job.audioSources[0]).href : job.source, status: 'external' }
       : await retainAudio(job.source, p.retention, p.archive, job.id, job.sourceHash!, async () => {
         try { await access(join(out, 'transcript.md')); await access(join(out, 'notes.md')); await access(join(out, 'review.md')); await access(join(out, 'follow-up.md')); return true } catch { return false }
       })
-    this.update(job.id, { retained: true, audioUri: retained.uri })
+    this.update(job.id, { retained: true, audioUri: retained.uri, audioStatus: retained.status })
     await this.exportTranscript(job, retained.uri, retained.status)
     await rm(wav, { force: true })
     await rm(join(folder, 'samples'), { force: true, recursive: true })

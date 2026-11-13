@@ -4,6 +4,7 @@ import { capabilities, platformOf } from '../shared/platform'
 import type { ChatView, ConversationSummary, ConversationView, NoteView, PromptAction, SetupState, UpdateStatus, WidgetView, YogurtApi } from '../shared/types'
 
 const api: YogurtApi = {
+  runtime: { models: () => ipcRenderer.invoke('runtime:models'), scanModels: () => ipcRenderer.invoke('runtime:scanModels'), scanModelFolder: () => ipcRenderer.invoke('runtime:scanModelFolder'), selectModels: selection => ipcRenderer.invoke('runtime:selectModels', selection), state: () => ipcRenderer.invoke('runtime:state'), save: value => ipcRenderer.invoke('runtime:save', value), pick: key => ipcRenderer.invoke('runtime:pick', key), open: key => ipcRenderer.invoke('runtime:open', key) },
   projects: {
     state: () => ipcRenderer.invoke('projects:state'),
     defaultProvider: id => ipcRenderer.invoke('projects:default', id),
@@ -11,6 +12,12 @@ const api: YogurtApi = {
     save: p => ipcRenderer.invoke('projects:save', p),
     credential: (provider, key) => ipcRenderer.invoke('projects:credential', provider, key),
     import: id => ipcRenderer.invoke('projects:import', id),
+    importMany: id => ipcRenderer.invoke('projects:importMany', id),
+    checkInbox: () => ipcRenderer.invoke('projects:check'),
+    approveInput: id => ipcRenderer.invoke('projects:approve', id),
+    ignoreInput: id => ipcRenderer.invoke('projects:ignore', id),
+    retry: id => ipcRenderer.invoke('projects:retry', id),
+    chooseProjectFolder: (project, kind) => ipcRenderer.invoke('projects:projectFolder', project, kind),
     cancel: id => ipcRenderer.invoke('projects:cancel', id),
     summarize: id => ipcRenderer.invoke('projects:summarize', id),
     speakers: (id, map) => ipcRenderer.invoke('projects:speakers', id, map),

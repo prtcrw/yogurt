@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
-import { realpathSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { isAbsolute, relative, sep } from 'node:path'
 import type { Project, ProjectJob, VoiceProfile } from '../../shared/projects'
 import { inside } from './files'
@@ -33,6 +33,17 @@ export class ProjectStore {
       if (!rel || rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel)) throw new Error('Audio archive must be outside the Obsidian vault')
       p.archive = archive
     }
+    if (p.input?.trim()) {
+      p.input = realpathSync(p.input.trim())
+      if (!statSync(p.input).isDirectory()) throw new Error('Choose an input folder')
+    } else p.input = ''
+    if (p.checkInput) {
+      if (!p.input) throw new Error('Choose an input folder before enabling folder checks')
+      if (p.retention === 'archive' && p.archive === p.input) throw new Error('Use a separate input and archive folder')
+      if (this.projects().some(other => other.id !== p.id && other.checkInput && other.input === p.input)) throw new Error('Another project already checks this input folder; choose a separate folder')
+    }
+    if (p.speechLanguage && !/^(auto|[a-z]{2,3})$/.test(p.speechLanguage)) throw new Error('Choose a supported speech language code')
+    if (p.checkInput !== undefined && typeof p.checkInput !== 'boolean' || p.followUps !== undefined && typeof p.followUps !== 'boolean') throw new Error('Invalid project preference')
     this.db.prepare('INSERT INTO project_workspaces VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(p.id, JSON.stringify(p))
     return p
   }

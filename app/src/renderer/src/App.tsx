@@ -1,3 +1,5 @@
+import { ModelSetup } from './screens/ModelSetup'
+import { InboxNotice } from './components/InboxNotice'
 import { Projects } from './screens/Projects'
 import { LoadingContent } from './components/LoadingContent'
 import { MeetingListLoading } from './screens/Home'
@@ -172,6 +174,8 @@ export function App() {
 
   if (route === '/projects') return <div className="h-full bg-bg text-ink overflow-auto"><TitleBar /><Projects back={() => go('')} /></div>
 
+  if (setup?.phase === 'models') return <div data-testid="app-shell" className="h-full bg-bg text-ink"><TitleBar /><ModelSetup providers={() => go('/projects')} /></div>
+
   // still starting, or checking what is on disk: the launch screen, so a finished install never flashes the first-run screen
   if (!setup || !plan || holding) return <div data-testid="app-shell" className="h-full bg-bg"><TitleBar /><BootScreen /></div>
   const noteId = route.startsWith('/note/') ? route.slice(6) : null
@@ -194,6 +198,7 @@ export function App() {
       {ready && searching && <Search folder={folder} folders={folders} onOpen={open} onNavigate={go} onShortcuts={openShortcuts} onSettingsChange={() => setSettingsRevision((v) => v + 1)} onClose={() => setSearching(false)} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => toggleSidebar()} />}
       {ready && shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
       {ready && <TrashToast go={go} />}
+      <InboxNotice review={() => go('/projects')} />
     </div>
   )
 }

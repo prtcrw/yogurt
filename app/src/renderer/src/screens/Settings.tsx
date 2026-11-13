@@ -1,3 +1,4 @@
+import { RuntimeSettings } from '../components/RuntimeSettings'
 import { LoadingContent } from '../components/LoadingContent'
 import { useCallback, useEffect, useState } from 'react'
 import { Check, ChevronDown, Copy, Download, ExternalLink, Globe, Lock, Upload } from 'lucide-react'
@@ -121,6 +122,7 @@ export function Settings({ revision = 0 }: { revision?: number }) {
             </div>
           </LoadingContent></div>
 
+          <RuntimeSettings />
           <h2 className="settings-section-heading">{t('What Yogurt can use')}</h2>
           <LoadingContent pending={!perms}><ul className="settings-group">
             {supportedKinds(window.yogurt.capabilities).map((k) => <PermissionRow key={k} kind={k} status={perms?.[k]} onAsk={() => void window.yogurt.permissions.request(k).then(reload)} />)}

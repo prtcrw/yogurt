@@ -1,3 +1,6 @@
+import { ModelDiscovery } from './modelDiscovery'
+import { RuntimePreferencesStore } from './runtimePreferences'
+import { hookRuntime } from './runtimeIpc'
 import { hookProjects } from './projects/ipc'
 import { matchSearchPeople, searchPersonKey } from '../shared/searchPeople'
 import { resolvePeople } from './people'
@@ -86,6 +89,16 @@ if (process.platform === 'win32') app.setAppUserModelId('so.yogurt.projects')
 app.setPath('userData', userDataDir())
 mkdirSync(userDataDir(), { recursive: true })
 logToFile(join(userDataDir(), 'logs', 'main.log'))
+const runtimePreferences = new RuntimePreferencesStore(join(userDataDir(), 'runtime.json'), userDataDir())
+const runtime = runtimePreferences.effective()
+const localSummaryEnabled = () => { try { return !JSON.parse(readFileSync(join(userDataDir(), 'projects/preferences.json'), 'utf8')).external } catch { return true } }
+const stockModels = join(app.getPath('appData'), 'Yogurt/models')
+const modelDiscovery = new ModelDiscovery({ preferences: runtimePreferences, choiceFile: join(userDataDir(), 'model-setup.json'),
+  enabled: !isFake() || process.env.YOGURT_FAKE_MODEL_DISCOVERY === '1', localSummary: localSummaryEnabled,
+  roots: isFake() ? [runtime.modelsDirectory, join(userDataDir(), 'reusable-models')] : [runtime.modelsDirectory, stockModels,
+    join(app.getPath('appData'), 'ownscribe/inference'), join(os.homedir(), '.cache/huggingface/hub'), join(os.homedir(), '.cache/whisper'),
+    join(os.homedir(), '.lmstudio/models'), join(os.homedir(), '.ollama/models/blobs'), join(os.homedir(), 'Library/Caches/llama.cpp'), join(os.homedir(), 'models')],
+})
 // logged, never a dialog: one bad message or a failed promise must not stop a recording
 process.on('unhandledRejection', (err) => console.error('unhandled rejection', err))
 process.on('uncaughtException', (err) => console.error('uncaught exception', err))
@@ -158,16 +171,16 @@ function createWindow() {
 /** Windows and Linux: what graphics the notes engine can use; null when it can't tell (or crashed checking: it then runs without them) */
 let probeGpu: () => Promise<GpuProbe | null> = async () => null
 function createSetup(): SetupController {
-  const modelsDir = join(userDataDir(), 'models')
+  const modelsDir = runtime.modelsDirectory
   return new SetupController({
     modelsDir,
+    customModels: { asr: runtime.speechModel || undefined, llm: runtime.summaryModel || undefined },
+    modelSelectionRequired: () => modelDiscovery.required(), selectModels: () => modelDiscovery.waitForSelection(),
+    verifiedModelRoots: isFake() ? [] : [stockModels],
     // Windows and Linux: the notes engine checks the graphics first (a Mac shares its memory with them, no check)
     getHardware: isFake() ? () => fakeHardware(platform) : async () => toHardware(await readSysInfo(userDataDir()), process.platform === 'darwin' ? undefined : await probeGpu()),
     // the one in this build: new models come with app updates
-    notesEnabled: () => {
-      const file = join(userDataDir(), 'projects/preferences.json')
-      try { return !JSON.parse(readFileSync(file, 'utf8')).external } catch { return true }
-    },
+    notesEnabled: localSummaryEnabled,
     getCatalog: async () => loadCatalog({ bundled: bundledCatalog, licenses }),
     download: isFake() ? fakeDownloadDeps({ stepMs: Number(process.env.YOGURT_FAKE_STEP_MS ?? 5), notesMs: Number(process.env.YOGURT_FAKE_NOTES_MODEL_MS ?? 0) }) : realDeps,
     ...(isFake() ? { sha256Override: 'FAKE' } : {}),
@@ -486,6 +499,7 @@ app.whenReady().then(() => {
   ipcMain.handle('setup:state', () => setup.state)
   ipcMain.handle('setup:retry', () => setup.retry())
   const store = openStore(join(userDataDir(), 'yogurt.db'))
+  hookRuntime(runtimePreferences, modelDiscovery)
   storeRef = store
   store.markInterrupted()
   initMeetings(store)
@@ -562,7 +576,7 @@ app.whenReady().then(() => {
   const embedder = createEmbedder({ engine, modelPath: () => setup.installed()?.embed, id: bundledCatalog.embedding.id, dims: bundledCatalog.embedding.dims })
   const queue = createQueue({ recording: () => !!activeMeeting(), smallMac, backlogMs: transcriptionBacklogMs, onIdle: () => { void model.unload(); void embedder.unload() }, modelReady: () => projectWorkflows.externalSelected() || !!setup.installed()?.llm })
   setup.onNotesModel(() => { queue.modelArrived(); conversations.refresh() })
-  const projectWorkflows = hookProjects({ db: store.db, directory: join(userDataDir(), 'projects'), model, queue, fake: isFake(), unload: async () => { await model.unload(); await embedder.unload() },
+  const projectWorkflows = hookProjects({ db: store.db, directory: join(userDataDir(), 'projects'), workDirectory: runtime.workDirectory, voiceDirectory: runtime.voiceDirectory, executables: runtime, model, queue, fake: isFake(), unload: async () => { await model.unload(); await embedder.unload() },
     localSelected: () => { if (!setup.installed()?.llm) void setup.start() },
     asrModel: () => setup.installed()?.asr, recording: () => !!activeMeeting(),
     changed: () => win?.webContents.send('projects:changed'),

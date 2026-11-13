@@ -1,9 +1,10 @@
 import { asrCandidates, pick, pickAsr, pickBySpeed, speedKey, type Catalog, type CatalogAsr, type Choice, type Hardware } from '@yogurt/picker'
 import { rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { ChecksumError, DiskSpaceError, ensureFile, fileNameFor, isVerified, partialDownloadGB, type DownloadDeps } from './downloader'
 import type { SetupState } from '../shared/types'
 import { t } from '../shared/i18n'
+import { validateModel } from './runtimePreferences'
 import { tooSlow, tooWeak } from './localCheck'
 
 /** What the speed check found on one computer (speedKey): the model kept (null: none keeps up) and each one's time over the clip's length */
@@ -17,6 +18,10 @@ export type SpeedDeps = {
 
 export type SetupDeps = {
   notesEnabled?: () => boolean
+  customModels?: { asr?: string; llm?: string }
+  modelSelectionRequired?(): boolean
+  selectModels?(): Promise<{ asr?: string; llm?: string }>
+  verifiedModelRoots?: string[]
   getHardware(): Promise<Hardware>
   /** the catalog in this build; never waits on the network */
   getCatalog(): Promise<Catalog>
@@ -46,6 +51,7 @@ export function friendly(err: unknown): string {
   if (err instanceof DiskSpaceError) return t('Not enough disk space. Free up {gb} GB and try again.', { gb: err.needGB })
   if (err instanceof ChecksumError) return t('The download was corrupted. Try again.')
   const msg = err instanceof Error ? err.message : String(err)
+  if (msg.startsWith('Configured ')) return msg
   if (/fetch failed|ENOTFOUND|ECONN|ETIMEDOUT|EAI_AGAIN|network|socket|HTTP \d|receiving data/i.test(msg)) {
     return t('Download interrupted. Check your connection and try again.')
   }
@@ -119,22 +125,32 @@ export class SetupController {
   private async run() {
     this.set({ phase: 'checking', fraction: 0 })
     try {
+      if (this.deps.modelSelectionRequired?.() && this.deps.selectModels) {
+        this.set({ phase: 'models', fraction: 0 })
+        this.deps.customModels = await this.deps.selectModels()
+        this.set({ phase: 'checking', fraction: 0 })
+      }
+      const custom = this.deps.customModels
+      for (const [kind, path] of Object.entries(custom ?? {})) if (path) {
+        try { await validateModel(path, kind === 'asr' ? 'speech' : 'summary') }
+        catch (e) { throw new Error(`Configured ${kind === 'asr' ? 'speech' : 'summary'} model is unavailable: ${e instanceof Error ? e.message : String(e)}`) }
+      }
       const [hw, catalog] = await Promise.all([this.deps.getHardware(), this.deps.getCatalog()])
       const llm = pick(hw, catalog.models)
       const weak = tooWeak(hw, !!llm.recommended)
-      if (!llm.recommended || weak) return this.set({ phase: 'error', fraction: 0, message: weak ?? '' })
+      if ((!llm.recommended || weak) && !custom?.llm && this.deps.notesEnabled?.() !== false) return this.set({ phase: 'error', fraction: 0, message: weak ?? '' })
 
       // The first notes model is the starter when it downloads faster than the pick; otherwise the pick itself.
-      const starter = llm.starter && llm.starter.build.sizeGB < llm.recommended.build.sizeGB ? llm.starter : llm.recommended
+      const starter = llm.recommended && llm.starter && llm.starter.build.sizeGB < llm.recommended.build.sizeGB ? llm.starter : llm.recommended
       const later = starter === llm.recommended ? undefined : llm.recommended
-      console.info('NOTES', `notes models for this computer: ${starter.model.id}${later ? `, then ${later.model.id}` : ''} (graphics ${hw.gpu.kind}${hw.gpu.name ? ` ${hw.gpu.name}` : ''}, ${hw.totalRamGB} GB)`)
+      console.info('NOTES', `notes models for this computer: ${starter?.model.id ?? 'custom'}${later ? `, then ${later.model.id}` : ''} (graphics ${hw.gpu.kind}${hw.gpu.name ? ` ${hw.gpu.name}` : ''}, ${hw.totalRamGB} GB)`)
       const dirs = { asr: join(this.deps.modelsDir, 'asr'), llm: join(this.deps.modelsDir, 'llm'), embed: join(this.deps.modelsDir, 'embed') }
 
       // Speech first: ready (recording works) once it is in. The notes models come after.
       let asr = pickAsr(hw, catalog)
       const asrItem = (m: CatalogAsr): Item => ({ url: m.url, sha256: m.sha256, bytes: m.bytes, dir: dirs.asr, fileName: fileNameFor(m.url) })
       // whisper-server is built into the app (catalog.whisperServer.bundled), so only the speech model is downloaded for it.
-      const starterItem = llmItem(dirs.llm, starter)
+      const starterItem = starter && llmItem(dirs.llm, starter)
       const e = catalog.embedding
       const embedItem: Item = { url: e.url, sha256: e.sha256, bytes: e.bytes, dir: dirs.embed, fileName: fileNameFor(e.url) }
 
@@ -148,10 +164,10 @@ export class SetupController {
       if (speed && (known?.model === null || !candidates.length)) return this.set({ phase: 'error', fraction: 0, message: tooSlow(hw.os) })
       const keep = known && candidates.find((a) => a.id === known.model)
 
-      const waitFor: Item[] = [asrItem(speed ? keep ?? candidates[0] : asr.model)]
+      const waitFor: Item[] = custom?.asr ? [] : [asrItem(speed ? keep ?? candidates[0] : asr.model)]
       const total = waitFor.reduce((n, i) => n + i.bytes, 0)
       // room for the first notes model too, so it never runs out of disk after ready
-      await this.checkDisk(this.deps.notesEnabled?.() === false ? waitFor : [...waitFor, starterItem, embedItem])
+      await this.checkDisk(this.deps.notesEnabled?.() === false ? waitFor : [...waitFor, ...(!custom?.llm && starterItem ? [starterItem] : []), embedItem])
 
       let done = 0
       const report = (item: Item, fraction: number) => this.set({ phase: 'downloading', fraction: Math.min(1, (done + item.bytes * fraction) / total) })
@@ -165,9 +181,9 @@ export class SetupController {
 
       // speech: if the first choice downloads corrupted twice, the smaller one takes its place
       const tried: string[] = []
-      let asrPath: string | undefined
-      if (speed && keep) asrPath = await get(asrItem(keep))
-      else if (speed) {
+      let asrPath: string | undefined = custom?.asr
+      if (!asrPath && speed && keep) asrPath = await get(asrItem(keep))
+      else if (!asrPath && speed) {
         const r = await this.timeSpeech(speed, candidates, get, asrItem)
         speed.save({ key, ...r.result, at: Date.now() })
         if (!r.path) return this.set({ phase: 'error', fraction: this._state.fraction, message: tooSlow(hw.os) })
@@ -180,9 +196,10 @@ export class SetupController {
           asr = pickAsr(hw, catalog, { exclude: tried })
         }
       }
-      this.paths = { asr: asrPath }
+      this.paths = { asr: asrPath, ...(custom?.llm ? { llm: custom.llm } : {}) }
       this.set({ phase: 'ready', fraction: 1 })
-      this.startNotes(starterItem, embedItem, later && llmItem(dirs.llm, later))
+      if (starterItem) this.startNotes(starterItem, embedItem, later ? llmItem(dirs.llm, later) : undefined)
+      else if (custom?.llm && this.deps.notesEnabled?.() !== false) this.background = this.startEmbedding(embedItem)
     } catch (err) {
       console.error('setup failed', err)
       this.set({ phase: 'error', fraction: this._state.fraction, message: friendly(err) })
@@ -218,6 +235,10 @@ export class SetupController {
    */
   private startNotes(first: Item, embed: Item, later: Item | undefined) {
     if (this.deps.notesEnabled?.() === false) return
+    if (this.deps.customModels?.llm) {
+      for (const listener of this.notesListeners) listener()
+      this.background = this.startEmbedding(embed); return
+    }
     this.background = (async () => {
       const waits = this.deps.notesRetryMs ?? NOTES_RETRY_MS
       // Waiting notes show whole percents; every 10% goes in the log.
@@ -289,8 +310,15 @@ export class SetupController {
     return this.background
   }
 
+  private reusable(item: Item): string | undefined {
+    for (const root of this.deps.verifiedModelRoots ?? []) for (const dir of [join(root, basename(item.dir)), root]) {
+      if (isVerified(dir, item.fileName, this.sha(item))) return join(dir, item.fileName)
+    }
+    return undefined
+  }
+
   private async checkDisk(items: Item[]) {
-    const missing = items.filter((i) => !isVerified(i.dir, i.fileName, this.sha(i)))
+    const missing = items.filter((i) => !isVerified(i.dir, i.fileName, this.sha(i)) && !this.reusable(i))
     if (!missing.length) return
     const need = missing.reduce((n, i) => n + i.bytes / 1e9 - partialDownloadGB(i.dir, i.fileName), 0) + DISK_HEADROOM_GB - (await this.deps.download.freeDiskGB(this.deps.modelsDir))
     if (need > 0) throw new DiskSpaceError(Math.ceil(need))
@@ -300,6 +328,7 @@ export class SetupController {
 
   /** Download (or reuse) a verified file, retrying transient failures. */
   private async fetch(i: Item, onProgress?: (p: { fraction: number; etaSec: number }) => void): Promise<string> {
+    const existing = this.reusable(i); if (existing) return existing
     const delays = this.deps.retryDelaysMs ?? [2000, 8000]
     for (let attempt = 0; ; attempt++) {
       try {
