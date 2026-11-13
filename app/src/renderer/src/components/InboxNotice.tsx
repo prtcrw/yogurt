@@ -7,7 +7,8 @@ export function InboxNotice({ review }: { review(): void }) {
     update(); return window.yogurt.projects.onChange(update)
   }, [])
   if (!count) return null
-  return <div role="status" data-testid="inbox-notice" style={{ position: 'fixed', right: 22, bottom: 22, zIndex: 100, background: 'var(--color-bg, #ecebe8)', color: 'var(--color-ink, #222)', border: '1px solid #8887', boxShadow: '0 4px 20px #0002', borderRadius: 10, padding: 14 }}>
-    {count} recording{count === 1 ? '' : 's'} waiting for import approval. <button onClick={review} style={{ textDecoration: 'underline', marginLeft: 10 }}>Review recordings</button>
+  return <div role="status" data-testid="inbox-notice" className="inbox-notice">
+    <span>{count} recording{count === 1 ? '' : 's'} waiting for import approval</span>
+    <button className="workspace-button primary no-drag" onClick={review}>Review recordings</button>
   </div>
 }

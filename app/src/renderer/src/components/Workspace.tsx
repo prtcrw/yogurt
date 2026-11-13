@@ -2,7 +2,7 @@ import { toasts } from './TrashToast'
 import { askDestination } from '../../../shared/askContext'
 import * as Sidebar from '@animate-ui/react/primitives/sidebar'
 import { useEffect, useState, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, Slash, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, FolderKanban, Slash, Trash2 } from 'lucide-react'
 import type { MeetingView, Folder, WidgetView } from '../../../shared/types'
 import { t } from '../../../shared/i18n'
 import { command, keys, onMac } from '../keys'
@@ -55,8 +55,8 @@ export function Workspace({ route, meeting, folders, go, back, forward, search, 
   const links = [
     { route: '', label: t('Meetings'), Icon: FileText },
     { route: '/chat', label: t('Ask'), Icon: MessageCircle },
+    { route: '/projects', label: 'Projects', Icon: FolderKanban },
     { route: '/trash', label: t('Trash'), Icon: Trash2 },
-    { route: '/projects', label: 'Project workflows', Icon: FileText },
     { route: '/settings', label: t('Settings'), Icon: Settings },
   ]
   const folder = route.startsWith('/folder/') ? folders?.find((s) => route === `/folder/${s.id}`) : undefined
@@ -83,14 +83,14 @@ export function Workspace({ route, meeting, folders, go, back, forward, search, 
       <div className="sidebar-titlebar" />
       <div className="workspace-sidebar-body">
         <button className="workspace-search no-drag" data-testid="search-open" aria-label={t('Search')} title={`${t('Search')} (${keys('⌘K')})`} onClick={search}><Search size={16} strokeWidth={1.75} aria-hidden="true" /><span>{t('Search')}</span><kbd>{keys('⌘K')}</kbd></button>
-        <nav aria-label={t('Workspace')}>{links.slice(0, 2).map(nav)}</nav>
+        <nav aria-label={t('Workspace')}>{links.slice(0, 3).map(nav)}</nav>
         <div className="workspace-folder-label">{t('Your workspace')}</div>
         <FoldersNav collapsed={collapsed} folders={folders} route={route} go={go} />
       </div>
       <div className="workspace-sidebar-footer">
         <FinishSetup collapsed={collapsed} />
-        {nav(links[2])}
         {nav(links[3])}
+        {nav(links[4])}
         <div className="workspace-brand"><span className="workspace-wordmark"><Wordmark height={25} /></span></div>
       </div>
       </div>

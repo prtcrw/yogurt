@@ -12,7 +12,9 @@ const on = (a: Access | undefined) => a === 'granted' || a === 'asked'
  * watching for it (on focus, and every 1.5 s while away) so coming back finds it already noticed.
  * done: called when it is on straight away (the prompt said yes); after a trip to System Settings the phase is back instead.
  */
-export function usePermissionFlow(kind: PermissionKind, initial: Access | undefined, done?: () => void) {
+export function usePermissionFlow(kind: PermissionKind, initial: Access | undefined, done?: () => void, opts: {
+  /** after the first run: when the prompt can't turn it on (or can't tell), go to System Settings instead of stopping */
+  settingsFallback?: boolean } = {}) {
   const [status, setStatus] = useState<Access | undefined>(initial)
   const [phase, setPhase] = useState<FlowPhase>('idle')
   const phaseRef = useRef(phase)
@@ -53,10 +55,11 @@ export function usePermissionFlow(kind: PermissionKind, initial: Access | undefi
       const st = await window.yogurt.permissions.request(kind)
       setStatus(st)
       if (on(st)) { setPhase('idle'); done?.(); return }
+      if (opts.settingsFallback) return openSettings()
       // said no in the Mac's prompt: from now on only System Settings turns it on
       setPhase(st === 'unknown' ? 'failed' : 'idle')
-    } catch { setPhase('failed') }
-  }, [kind, status, done, openSettings])
+    } catch { if (opts.settingsFallback) return openSettings(); setPhase('failed') }
+  }, [kind, status, done, openSettings, opts.settingsFallback])
 
   /** stop waiting (the guide was closed); focus still notices it later */
   const stop = useCallback(() => setPhase('idle'), [])

@@ -5,10 +5,15 @@ import { t } from '../shared/i18n'
 import type { Access } from './permissions'
 import { loadSettings, updateSettings } from './settings'
 
-/** A designated requirement includes the bundle ID and signer, but no install path or build version. */
+/**
+ * A designated requirement includes the bundle ID and signer, but no install path or build version. A local ad-hoc
+ * build has only an implied one ("# designated => cdhash H\"…\"") that changes with every build, so each build asks once.
+ */
 export function notificationIdentity(output: string): string | null {
-  const requirement = output.match(/^designated => .+$/m)?.[0].trim()
-  return requirement && /identifier "[^"]+"/.test(requirement) && /certificate |anchor |cdhash /.test(requirement) ? requirement : null
+  const requirement = output.match(/^(?:# )?designated => .+$/m)?.[0].replace(/^# /, '').trim()
+  if (!requirement) return null
+  if (/^designated => cdhash H"[0-9a-f]+"$/i.test(requirement)) return requirement
+  return /identifier "[^"]+"/.test(requirement) && /certificate |anchor |cdhash /.test(requirement) ? requirement : null
 }
 
 /** Remember a successful post for this signed app, never a migrated profile's unscoped flag. */

@@ -13,7 +13,7 @@ import { t } from '../../../shared/i18n'
 export function TurnOn({ kind, status, onOn, recording = false, className = 'workspace-button primary', testId = 'turn-on', label, descriptionId }: {
   kind: PermissionKind; status: Access; onOn(): void; recording?: boolean; className?: string; testId?: string; label?: string; descriptionId?: string
 }) {
-  const flow = usePermissionFlow(kind, status, onOn)
+  const flow = usePermissionFlow(kind, status, onOn, { settingsFallback: true })
   useEffect(() => { if (flow.phase === 'back') { flow.stop(); onOn() } }, [flow.phase])
   const c = permissionCopy(kind)
   return (
