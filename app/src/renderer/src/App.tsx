@@ -194,7 +194,7 @@ export function App() {
   return (
     <div data-testid="app-shell" className={`h-full text-ink ${ready ? 'bg-transparent' : 'bg-bg'}`}>
       {ready ? <Workspace route={route} meeting={meeting} folders={folders} go={go} back={history.current.length ? back : undefined} forward={future.current.length ? forward : undefined} search={() => setSearching(true)} collapsed={sidebarCollapsed} sidebarMotion={sidebarMotion} toggleSidebar={toggleSidebar}>{screen}</Workspace>
-        : <><TitleBar />{setup.phase === 'checking' && firstRunDone ? <BootScreen /> : <><button style={{ position: 'fixed', right: 20, top: 18, zIndex: 100 }} onClick={() => go('/projects')}>Project workflows & providers</button><Onboarding state={setup} plan={plan} onDone={() => setPlan({ intro: false, steps: [] })} /></>}</>}
+        : <><TitleBar />{setup.phase === 'checking' && firstRunDone ? <BootScreen /> : <><button className="ob-button quiet no-drag" style={{ position: 'fixed', right: 16, top: 10, zIndex: 100, minWidth: 0 }} onClick={() => go('/projects')}>Project workflows & providers</button><Onboarding state={setup} plan={plan} onDone={() => setPlan({ intro: false, steps: [] })} /></>}</>}
       {ready && searching && <Search folder={folder} folders={folders} onOpen={open} onNavigate={go} onShortcuts={openShortcuts} onSettingsChange={() => setSettingsRevision((v) => v + 1)} onClose={() => setSearching(false)} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => toggleSidebar()} />}
       {ready && shortcuts && <Shortcuts onClose={() => setShortcuts(false)} />}
       {ready && <TrashToast go={go} />}

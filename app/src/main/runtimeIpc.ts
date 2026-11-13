@@ -8,7 +8,7 @@ export function hookRuntime(store: RuntimePreferencesStore, discovery: ModelDisc
   ipcMain.handle('runtime:models', () => discovery.state())
   ipcMain.handle('runtime:scanModels', () => discovery.scan())
   ipcMain.handle('runtime:scanModelFolder', async () => { const result = await dialog.showOpenDialog({ title: 'Look for existing models in this folder', properties: ['openDirectory'] }); return result.canceled ? discovery.state() : discovery.scan(result.filePaths[0]) })
-  ipcMain.handle('runtime:selectModels', (_e, selection: { speech: string; summary: string }) => discovery.choose(selection))
+  ipcMain.handle('runtime:selectModels', (_e, selection: { speech: string; summary: string; modelsDirectory?: string }) => discovery.choose(selection))
   const keyOf = (key: string): RuntimePath => { if (!(Object.hasOwn(runtimeDefaults, key))) throw new Error('Unknown setting'); return key as RuntimePath }
   ipcMain.handle('runtime:state', () => store.state())
   ipcMain.handle('runtime:save', (_e, value: RuntimePreferences) => store.save(value))

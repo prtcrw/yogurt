@@ -76,9 +76,12 @@ export async function discoverModels(roots: string[], limits = { files: 3000, di
   return { candidates: candidates.sort((a, b) => a.kind.localeCompare(b.kind) || a.bytes - b.bytes || a.path.localeCompare(b.path)), searched }
 }
 
+/** What first-run setup continues with: models to reuse in place, and where any missing ones download */
+export type ModelSelection = { asr?: string; llm?: string; modelsDir?: string }
+
 export class ModelDiscovery {
   private result: ModelSearchState = { scanning: false, candidates: [], searched: [], confirmed: false, localSummary: true }
-  private pending?: (selection: { asr?: string; llm?: string }) => void
+  private pending?: (selection: ModelSelection) => void
   private scanPromise?: Promise<ModelSearchState>
   private extraRoots: string[] = []
   constructor(private d: { preferences: RuntimePreferencesStore; roots: string[]; choiceFile: string; enabled: boolean; localSummary(): boolean }) {}
@@ -93,23 +96,29 @@ export class ModelDiscovery {
     await this.scanPromise; return this.state()
   }
   async waitForSelection() {
-    const waiting = new Promise<{ asr?: string; llm?: string }>(resolve => { this.pending = resolve })
+    const waiting = new Promise<ModelSelection>(resolve => { this.pending = resolve })
     void this.scan()
     return waiting
   }
-  async choose(selection: { speech: string; summary: string }) {
+  /**
+   * Saves the models to reuse. During first-run setup nothing has been downloaded yet, so the model download folder
+   * applies right away; other folder and tool paths are saved and apply on the next launch, never blocking setup.
+   */
+  async choose(selection: { speech: string; summary: string; modelsDirectory?: string }) {
     if (typeof selection.speech !== 'string' || typeof selection.summary !== 'string') throw new Error('Choose model files or the recommended downloads')
-    const current = this.d.preferences.read()
-    if (this.pending && Object.keys(current).some(key => !['speechModel', 'summaryModel'].includes(key) && current[key as keyof typeof current] !== this.d.preferences.startup[key as keyof typeof current])) throw new Error('Restart Yogurt Projects to apply the new storage/tool paths before continuing setup.')
+    if (selection.modelsDirectory !== undefined && typeof selection.modelsDirectory !== 'string') throw new Error('Choose a model download folder')
     if (selection.speech) await validateModel(selection.speech, 'speech')
     if (selection.summary) await validateModel(selection.summary, 'summary')
-    const saved = await this.d.preferences.save({ ...this.d.preferences.read(), speechModel: selection.speech, summaryModel: selection.summary })
+    const current = this.d.preferences.read()
+    const modelsDirectory = this.pending && selection.modelsDirectory !== undefined ? selection.modelsDirectory : current.modelsDirectory
+    const saved = await this.d.preferences.save({ ...current, speechModel: selection.speech, summaryModel: selection.summary, modelsDirectory })
     await atomic(this.d.choiceFile, JSON.stringify({ confirmed: true }))
     if (this.pending) {
       // Before the first download/inference, model selections can take effect immediately.
-      this.d.preferences.startup.speechModel = saved.saved.speechModel; this.d.preferences.startup.summaryModel = saved.saved.summaryModel
+      const startup = this.d.preferences.startup
+      startup.speechModel = saved.saved.speechModel; startup.summaryModel = saved.saved.summaryModel; startup.modelsDirectory = saved.saved.modelsDirectory
       const resolve = this.pending; this.pending = undefined
-      resolve({ asr: saved.saved.speechModel || undefined, llm: saved.saved.summaryModel || undefined })
+      resolve({ asr: saved.saved.speechModel || undefined, llm: saved.saved.summaryModel || undefined, modelsDir: this.d.preferences.effective().modelsDirectory })
     }
   }
 }

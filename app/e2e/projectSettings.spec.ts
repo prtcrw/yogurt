@@ -88,6 +88,7 @@ test('first startup discovers existing models and waits for a choice before any 
     await expect(page.getByLabel('Existing local summary model')).toHaveValue(summary)
     expect((await page.evaluate(() => window.yogurt.setup.state())).phase).toBe('models')
     expect(existsSync(join(profile, 'models'))).toBe(false)
+    await page.screenshot({ path: join(tmpdir(), 'yogurt-model-setup.png') })
     await page.getByTestId('models-continue').click()
     await expect(page.getByTestId('home')).toBeVisible({ timeout: 20000 })
     const prefs = await page.evaluate(() => window.yogurt.runtime.state())

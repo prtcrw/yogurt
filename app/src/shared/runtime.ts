@@ -24,7 +24,7 @@ export type RuntimeApi = {
   models(): Promise<ModelSearchState>
   scanModels(): Promise<ModelSearchState>
   scanModelFolder(): Promise<ModelSearchState>
-  selectModels(selection: { speech: string; summary: string }): Promise<void>
+  selectModels(selection: { speech: string; summary: string; modelsDirectory?: string }): Promise<void>
 }
 export type ModelCandidate = { kind: 'speech' | 'summary'; path: string; name: string; bytes: number }
 export type ModelSearchState = { scanning: boolean; candidates: ModelCandidate[]; searched: string[]; confirmed: boolean; localSummary: boolean }

@@ -20,7 +20,7 @@ export type SetupDeps = {
   notesEnabled?: () => boolean
   customModels?: { asr?: string; llm?: string }
   modelSelectionRequired?(): boolean
-  selectModels?(): Promise<{ asr?: string; llm?: string }>
+  selectModels?(): Promise<{ asr?: string; llm?: string; modelsDir?: string }>
   verifiedModelRoots?: string[]
   getHardware(): Promise<Hardware>
   /** the catalog in this build; never waits on the network */
@@ -127,7 +127,9 @@ export class SetupController {
     try {
       if (this.deps.modelSelectionRequired?.() && this.deps.selectModels) {
         this.set({ phase: 'models', fraction: 0 })
-        this.deps.customModels = await this.deps.selectModels()
+        const { modelsDir, ...models } = await this.deps.selectModels()
+        this.deps.customModels = models
+        if (modelsDir) this.deps.modelsDir = modelsDir
         this.set({ phase: 'checking', fraction: 0 })
       }
       const custom = this.deps.customModels
