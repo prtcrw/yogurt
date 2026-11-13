@@ -1,4 +1,4 @@
-> **Local fork: Yogurt Projects.** Project workflows, Obsidian exports, speaker profiles and selectable summary providers. Read [setup, storage policy and limitations](PROJECT_WORKFLOWS.md).
+> **Enhanced fork: Yogurt Projects.** Based on Yogurt v0.3.11. Each Yogurt folder can point at a project folder on disk, a meeting agent (Codex or Claude Code) can plan next steps after a meeting, and setup is easier. See [what's improved](#whats-improved-in-this-fork) and [setup, storage policy and limitations](PROJECT_WORKFLOWS.md).
 
 <p align="center">
   <a href="https://yogurt.so?utm_source=github&utm_medium=readme&utm_campaign=yogurt">
@@ -27,6 +27,18 @@
   <a href="https://yogurt.so?utm_source=github&utm_medium=readme&utm_campaign=yogurt">yogurt.so</a> · <a href="docs/README.md">Help</a> · <a href="docs/building.md">Build and run locally</a> · <a href="LICENSE">MIT license</a><br><br>
   Made by <a href="https://frigade.com?utm_source=github&utm_medium=readme&utm_campaign=yogurt">Frigade</a>.
 </p>
+
+## What's improved in this fork
+
+This fork (`enhanced` branch, app name **Yogurt Projects**) keeps upstream Yogurt's local-first recording and notes, and adds:
+
+- **Folders that point at a project on disk.** Open a Yogurt folder, choose **Save to a folder on disk…**, and pick the project folder. Meetings filed there are saved as `<project>/Meetings/<date title>/summary.md` and `transcript.md`. Meetings still open as normal Yogurt pages with live transcript and Ask. Files you edit by hand are never overwritten.
+- **Meeting agent.** After a meeting, run Codex or Claude Code (your own CLI login) to write minutes, check the kanban and knowledge base, and propose next steps. It can write only to the meeting folder and an `Agent Inbox` folder, and follows a `YOGURT.md`, `AGENTS.md` or `CLAUDE.md` in the project. No MCP server is needed, because the agent works directly on the files.
+- **Project workflows.** Import recordings, review speakers, and summarize with project context. Pick a summary provider per project: the local model, Codex, Claude Code, OpenAI, Anthropic or an OpenAI-compatible endpoint. Watch an inbox folder for new recordings. Remember confirmed voices.
+- **Easier first-run setup.** Setup scans for models you already have (Whisper, GGUF, LM Studio, Ollama, Hugging Face) and reuses them instead of downloading again. You can always continue, and paths for models and tools are editable in Settings.
+- **Permissions that work on local builds.** Notifications and Accessibility "Turn on" work, and `pnpm package-local` now compiles first and signs with a stable identity, so macOS permissions survive rebuilds.
+
+Not done yet: running the meeting agent on automatically saved meetings, syncing disk edits back into Yogurt, and translations of the new screens. Real Codex and Claude Code runs have not been tested.
 
 ## What it does
 

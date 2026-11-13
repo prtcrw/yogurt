@@ -63,3 +63,10 @@ Per-project settings now include the input folder, folder checking, output-folde
 Other conveniences: multiple-file imports start in the project's input folder, project selection is remembered, saved API keys can be removed, and failed/cancelled jobs can be retried from their checkpoint. Saved transcripts are reviewed before another summary; completed audio retention is not repeated. Disabling follow-ups still writes an explanatory `follow-up.md` and avoids the extra generation request.
 
 Validation for .2: 1,859 unit tests passed (four skipped), typecheck/build passed, and four isolated Electron UI tests passed, covering restart persistence, folder approval and first-startup reuse without replacement downloads. Tests use synthetic model headers and fake inference; real-model inference accuracy is not claimed.
+
+
+## Folders as projects (Projects .3)
+
+A project is now one folder on disk, with no Obsidian vault setting. Link a Yogurt folder to it from the folder page (**Save to a folder on disk…**) or from **Project workflows → Yogurt folder**. Meetings in a linked folder are written to `<project>/<output subfolder>/<YYYY-MM-DD Title>/summary.md` and `transcript.md`. Existing vault-plus-folder projects are read as that folder. Files edited by hand are skipped on later saves, and a taken folder name gets ` (2)`.
+
+The optional meeting agent (Codex or Claude Code) runs when you click Run. It may write to the meeting folder and the project's `Agent Inbox`, and it reads instructions from `YOGURT.md`, `AGENTS.md` or `CLAUDE.md`. Statements above about choosing an Obsidian vault describe the earlier version.
