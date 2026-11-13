@@ -21,6 +21,8 @@ import { ChatPage } from './screens/ChatPage'
 import { BootScreen } from './components/BootScreen'
 import { bootHoldMs } from '../../shared/onboarding'
 import { Folder } from './screens/Folder'
+import { WorkspaceFile } from './screens/WorkspaceFile'
+import { fileOfRoute, useWorkspace } from './workspaceFolder'
 import { useFolders } from './folders'
 import type { LibrarySource, MeetingView, OnboardingPlan, SetupState } from '../../shared/types'
 
@@ -132,6 +134,7 @@ export function App() {
   const [searching, setSearching] = useState(false)
   const [settingsRevision, setSettingsRevision] = useState(0)
   const folders = useFolders()
+  const workspace = useWorkspace()
   const [suggestedFolders, setSuggestedFolders] = useState<Record<string, string>>({})
   const dismissFolderSuggestion = (id: string) => setSuggestedFolders((current) => {
     const next = { ...current }; delete next[id]; return next
@@ -188,7 +191,8 @@ export function App() {
   const suggestedFolder = noteId ? folders?.find((s) => s.id === suggestedFolders[noteId]) : undefined
   // a folder's page waits for the list; a folder that is gone shows Meetings
   const folderScreen = folderId && (folder ? <Folder key={folder.id} folder={folder} open={open} onStarted={(id) => setSuggestedFolders((current) => ({ ...current, [id]: folder.id }))} /> : !folders ? <div className="native-folder"><StartRecording /><div className="native-library"><LoadingContent pending testId="meetings-loading" skeleton={<><div className="folder-page-heading"><h1><span className="loading-bar" style={{ width: 140 }} /></h1></div><MeetingListLoading showFolders={false} /></>} /></div></div> : null)
-  const screen = route === '/projects' ? <Projects /> : settings ? <Settings revision={settingsRevision} /> : noteId ? <Note key={noteId} id={noteId} onSource={openSource} onTitleChange={setMeeting} at={jump?.id === noteId ? jump : undefined}
+  const filePath = fileOfRoute(route)
+  const screen = filePath ? <WorkspaceFile key={filePath} path={filePath} workspace={workspace} go={go} /> : route === '/projects' ? <Projects /> : settings ? <Settings revision={settingsRevision} /> : noteId ? <Note key={noteId} id={noteId} onSource={openSource} onTitleChange={setMeeting} at={jump?.id === noteId ? jump : undefined}
     folderSuggestion={suggestedFolder ? { folder: suggestedFolder, dismiss: () => dismissFolderSuggestion(noteId) } : undefined} />
     : chatId !== undefined ? <ChatPage id={chatId} go={go} openSource={openSource} />
     : trash ? <Trash open={open} /> : folderScreen || <Home open={open} openFolder={(id) => go(`/folder/${id}`)} />

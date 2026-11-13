@@ -42,6 +42,13 @@ export class ProjectStore {
       if (p.retention === 'archive' && p.archive === p.input) throw new Error('Use a separate input and archive folder')
       if (this.projects().some(other => other.id !== p.id && other.checkInput && other.input === p.input)) throw new Error('Another project already checks this input folder; choose a separate folder')
     }
+    if (p.agent !== undefined && !['', 'codex', 'claude'].includes(p.agent)) throw new Error('Choose Codex or Claude Code as the meeting agent')
+    if (p.agentModel !== undefined && (typeof p.agentModel !== 'string' || p.agentModel.length > 200)) throw new Error('Invalid agent model')
+    if (p.agentInbox !== undefined) {
+      if (typeof p.agentInbox !== 'string' || isAbsolute(p.agentInbox)) throw new Error('The agent inbox must be a folder inside the project')
+      p.agentInbox = p.agentInbox.trim() || 'Agent Inbox'
+      if (inside(root, p.agentInbox) === root) throw new Error('Choose a separate agent inbox folder')
+    }
     if (p.speechLanguage && !/^(auto|[a-z]{2,3})$/.test(p.speechLanguage)) throw new Error('Choose a supported speech language code')
     if (p.checkInput !== undefined && typeof p.checkInput !== 'boolean' || p.followUps !== undefined && typeof p.followUps !== 'boolean') throw new Error('Invalid project preference')
     this.db.prepare('INSERT INTO project_workspaces VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(p.id, JSON.stringify(p))

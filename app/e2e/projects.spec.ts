@@ -33,5 +33,21 @@ test('projects configure a CLI provider and export an existing meeting with a co
     expect(readFileSync(done.transcript!, 'utf8')).toContain('## S00001')
     expect(readFileSync(join(dirname(done.notes!), 'follow-up.md'), 'utf8')).toContain('No additional follow-up is suggested.')
     await expect(page.getByRole('button', { name: 'Open notes folder' })).toBeVisible()
+
+    // the meeting agent: off until chosen, then a Run button on the finished meeting
+    await expect(page.getByRole('button', { name: 'Run agent' })).toHaveCount(0)
+    await page.getByRole('tab', { name: 'Settings' }).click()
+    await page.getByLabel('Meeting agent').selectOption('claude')
+    await page.getByRole('button', { name: 'Save project', exact: true }).click()
+    await expect(page.getByText('Saved.', { exact: true })).toBeVisible()
+    await page.screenshot({ path: join(tmpdir(), 'yogurt-agent-settings.png'), fullPage: true })
+    await page.getByRole('tab', { name: /Activity/ }).click()
+    await page.getByRole('button', { name: 'Run agent' }).click()
+    await expect(page.getByText('Claude Code finished')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Run again' })).toBeVisible()
+    expect(readFileSync(join(dirname(done.notes!), 'minutes.md'), 'utf8')).toContain('Minutes')
+    expect(readFileSync(join(dirname(done.notes!), 'agent-report.md'), 'utf8')).toContain('Wrote minutes.md')
+    expect(readFileSync(join(vault, 'Agent Inbox', 'proposal.md'), 'utf8')).toContain('Proposal')
+    await page.screenshot({ path: join(tmpdir(), 'yogurt-agent-activity.png') })
   } finally { await app.close(); rmSync(root, { recursive: true, force: true }) }
 })

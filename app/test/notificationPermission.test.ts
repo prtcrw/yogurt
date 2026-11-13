@@ -34,7 +34,9 @@ afterEach(() => {
 it('uses the bundle and signing requirement, excluding the install path', () => {
   expect(notificationIdentity(`Executable=/somewhere/Yogurt.app\n${local}\n`)).toBe(local)
   expect(notificationIdentity('code object is not signed at all')).toBeNull()
-  expect(notificationIdentity('designated => identifier "so.yogurt.app"')).toBeNull()
+  // a local build signed with its bundle ID alone
+  expect(notificationIdentity('designated => identifier "so.yogurt.app"')).toBe('designated => identifier "so.yogurt.app"')
+  expect(notificationIdentity('designated => identifier "so.yogurt.app" and something else')).toBeNull()
   // a local ad-hoc build: an implied requirement of the code hash alone
   expect(notificationIdentity('Executable=/Applications/Yogurt Projects.app\n# designated => cdhash H"dfb63020a8d346b14d24ae4450f32afd0596fa5d"\n'))
     .toBe('designated => cdhash H"dfb63020a8d346b14d24ae4450f32afd0596fa5d"')

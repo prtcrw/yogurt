@@ -11,9 +11,11 @@ import { atomic, inside } from './files'
 import { ProjectInbox } from './inbox'
 import { selectedNotesModel } from './selection'
 import { externalGenerator } from './providers'
+import { MeetingAgents } from './agent'
+import { WorkspaceFolder } from './workspace'
 
 export function hookProjects(d: { db: DatabaseSync; directory: string; workDirectory?: string; voiceDirectory?: string; executables?: { codexBinary?: string; claudeBinary?: string; ffmpegBinary?: string }; model: NotesModel; queue: Queue; unload(): Promise<void>; localSelected?(): void; fake?: boolean; asrModel(): string | undefined;
-  changed(): void; recording(): boolean; meeting(id: string): { title: string; segments: import('../../shared/projects').ProjectSegment[]; audio: string[] } }) {
+  changed(): void; workspaceChanged?(): void; meetingMarkdown?(id: string): { fileName: string; markdown: string } | undefined; recording(): boolean; meeting(id: string): { title: string; segments: import('../../shared/projects').ProjectSegment[]; audio: string[] } }) {
   const store = new ProjectStore(d.db)
   mkdirSync(d.directory, { recursive: true, mode: 0o700 })
   const secrets = join(d.directory, 'credentials.json')
@@ -59,6 +61,38 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; workDirec
       return llm.chat(prompt, () => {}, { temperature: 0, maxTokens: 4096 })
     } })
   const inbox = new ProjectInbox(store, d.changed)
+  const agents = new MeetingAgents({ store, changed: d.changed, binaries: d.executables, ...(d.fake ? { run: async ({ paths }) => {
+    await atomic(join(paths.meeting, 'minutes.md'), '# Minutes\n\nDevelopment fixture.\n')
+    await atomic(join(paths.inbox, 'proposal.md'), '# Proposal\n\nDevelopment fixture.\n')
+    return 'Wrote minutes.md and one proposal.'
+  } } : {}) })
+  const workspace = new WorkspaceFolder({ store, file: join(d.directory, 'workspace.json'), changed: () => { d.workspaceChanged?.(); d.changed() } })
+  const saveMeeting = async (id: string) => {
+    const meeting = d.meetingMarkdown?.(id)
+    return meeting ? (await workspace.writeMeeting(id, meeting.fileName, meeting.markdown)) ?? null : null
+  }
+  ipcMain.handle('workspace:state', () => workspace.state())
+  ipcMain.handle('workspace:use', (_e, projectId: unknown) => workspace.use(typeof projectId === 'string' ? projectId : null))
+  ipcMain.handle('workspace:list', (_e, path: string) => workspace.list(path))
+  ipcMain.handle('workspace:read', (_e, path: string) => workspace.read(path))
+  ipcMain.handle('workspace:open', async (_e, path: string) => {
+    const file = workspace.absolute(path), state = workspace.state()
+    // Obsidian opens its own vault's notes by path; anything else goes to the default app
+    if (state.obsidian) { await shell.openExternal(`obsidian://open?path=${encodeURIComponent(file)}`); return }
+    const error = await shell.openPath(file); if (error) throw new Error(error)
+  })
+  ipcMain.handle('workspace:reveal', (_e, path: string) => { shell.showItemInFolder(workspace.absolute(path)) })
+  ipcMain.handle('workspace:saveMeeting', (_e, id: string) => saveMeeting(id))
+  ipcMain.handle('workspace:meetingFile', (_e, id: string) => {
+    const path = workspace.meetingPath(id), root = workspace.root()
+    return path && root && existsSync(path) ? relative(root, path).split(/[\\/]/).join('/') : null
+  })
+  ipcMain.handle('projects:agent', (_e, id: string) => agents.start(id))
+  ipcMain.handle('projects:agentStop', (_e, id: string) => agents.stop(id))
+  ipcMain.handle('projects:openInbox', async (_e, projectId: string) => {
+    const path = agents.inbox(projectId); mkdirSync(path, { recursive: true })
+    const error = await shell.openPath(path); if (error) throw new Error(error)
+  })
   ipcMain.handle('projects:state', () => ({ inbox: inbox.pending(), inboxErrors: inbox.errors, projects: store.projects(), jobs: store.jobs(), profiles: store.profiles(), configured: Object.keys(readSecrets()), defaultProjectId: defaultProject()?.id }))
   ipcMain.handle('projects:folder', async () => {
     const result = await dialog.showOpenDialog({ title: 'Choose a project, Obsidian vault, or external audio archive', properties: ['openDirectory', 'createDirectory'] })
@@ -129,5 +163,5 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; workDirec
   const inboxTimer = setInterval(() => { void inbox.scan() }, 10000)
   void inbox.scan()
   workflow.resumeQueue()
-  return { model, externalSelected: () => !!defaultProject() && defaultProject()?.provider !== 'local', dispose: () => { clearInterval(timer); clearInterval(inboxTimer); workflow.dispose() } }
+  return { model, externalSelected: () => !!defaultProject() && defaultProject()?.provider !== 'local', workspaceMeeting: (id: string) => saveMeeting(id).catch(e => { console.warn('WORKSPACE could not write the meeting', e) }), dispose: () => { clearInterval(timer); clearInterval(inboxTimer); workflow.dispose(); agents.dispose(); workspace.dispose() } }
 }

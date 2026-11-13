@@ -22,6 +22,7 @@ export type MeetingCard = StoredMeetingCard & { paused?: true }
 export type YogurtApi = {
   runtime: import('./runtime').RuntimeApi
   projects: import('./projects').ProjectsApi
+  workspace: import('./projects').WorkspaceApi
   platform: NodeJS.Platform
   /** the computer the screens are for: the real one, or in fake mode the one YOGURT_FAKE_PLATFORM pretends to be (shortcut keys follow it) */
   os: string

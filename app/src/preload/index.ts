@@ -5,6 +5,17 @@ import type { ChatView, ConversationSummary, ConversationView, NoteView, PromptA
 
 const api: YogurtApi = {
   runtime: { models: () => ipcRenderer.invoke('runtime:models'), scanModels: () => ipcRenderer.invoke('runtime:scanModels'), scanModelFolder: () => ipcRenderer.invoke('runtime:scanModelFolder'), selectModels: selection => ipcRenderer.invoke('runtime:selectModels', selection), state: () => ipcRenderer.invoke('runtime:state'), save: value => ipcRenderer.invoke('runtime:save', value), pick: key => ipcRenderer.invoke('runtime:pick', key), open: key => ipcRenderer.invoke('runtime:open', key) },
+  workspace: {
+    state: () => ipcRenderer.invoke('workspace:state'),
+    use: projectId => ipcRenderer.invoke('workspace:use', projectId),
+    list: path => ipcRenderer.invoke('workspace:list', path),
+    read: path => ipcRenderer.invoke('workspace:read', path),
+    open: path => ipcRenderer.invoke('workspace:open', path),
+    reveal: path => ipcRenderer.invoke('workspace:reveal', path),
+    saveMeeting: id => ipcRenderer.invoke('workspace:saveMeeting', id),
+    meetingFile: id => ipcRenderer.invoke('workspace:meetingFile', id),
+    onChange: cb => { const f = () => cb(); ipcRenderer.on('workspace:changed', f); return () => ipcRenderer.off('workspace:changed', f) },
+  },
   projects: {
     state: () => ipcRenderer.invoke('projects:state'),
     defaultProvider: id => ipcRenderer.invoke('projects:default', id),
@@ -25,6 +36,9 @@ const api: YogurtApi = {
     exportMeeting: (projectId, meetingId) => ipcRenderer.invoke('projects:meeting', projectId, meetingId),
     sample: (id, cluster) => ipcRenderer.invoke('projects:sample', id, cluster),
     open: (id, kind) => ipcRenderer.invoke('projects:open', id, kind),
+    runAgent: id => ipcRenderer.invoke('projects:agent', id),
+    stopAgent: id => ipcRenderer.invoke('projects:agentStop', id),
+    openInbox: projectId => ipcRenderer.invoke('projects:openInbox', projectId),
     forget: id => ipcRenderer.invoke('projects:forget', id),
     onChange: cb => { const f = () => cb(); ipcRenderer.on('projects:changed', f); return () => ipcRenderer.off('projects:changed', f) },
   },

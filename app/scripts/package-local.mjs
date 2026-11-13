@@ -9,6 +9,8 @@ import { signAsync } from '@electron/osx-sign'
 import signing from './sign.cjs'
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const bundle = join(appDir, 'dist/mac-arm64/Yogurt Projects.app')
+const appId = readFileSync(join(appDir, 'electron-builder.yml'), 'utf8').match(/^appId:\s*(\S+)/m)?.[1]
+if (!appId) throw new Error('electron-builder.yml has no appId')
 const packaged = spawnSync('pnpm', ['exec', 'electron-builder', '--mac', '--arm64', '--dir', '--publish', 'never'], {
   cwd: appDir, stdio: 'inherit', env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
 })
@@ -25,6 +27,9 @@ try {
   await signAsync({ app: bundle, identity: '-', identityValidation: false, platform: 'darwin',
     gatekeeperAssess: false, preAutoEntitlements: false,
     optionsForFile: file => ({ hardenedRuntime: true, timestamp: 'none',
+      // Ad-hoc signatures are otherwise identified by their code hash, which changes with every build, so macOS
+      // would forget Accessibility, microphone and call-audio access after each rebuild. The bundle ID stays the same.
+      ...(resolve(file) === bundle ? { requirements: `=designated => identifier "${appId}"` } : {}),
       entitlements: signing.helperEntitlements(file, build) ?? join(temporary, resolve(file) === bundle ? 'mac.plist' : 'mac.inherit.plist'),
     }),
   })

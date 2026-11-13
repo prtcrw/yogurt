@@ -72,6 +72,7 @@ import { createEmbedder } from './library/embedder'
 import { createIndexer } from './library/indexer'
 import { hookConversations } from './library/conversations'
 import { hookShare } from './share'
+import { fileNameFor, toMarkdownFile } from '../shared/exportNotes'
 import { hookBackup } from './backupIpc'
 import { hookFolders } from './foldersIpc'
 import { hookMcp } from './mcp'
@@ -580,6 +581,13 @@ app.whenReady().then(() => {
     localSelected: () => { if (!setup.installed()?.llm) void setup.start() },
     asrModel: () => setup.installed()?.asr, recording: () => !!activeMeeting(),
     changed: () => win?.webContents.send('projects:changed'),
+    workspaceChanged: () => win?.webContents.send('workspace:changed'),
+    meetingMarkdown: id => {
+      const m = store.meeting(id)
+      if (!m || m.trashedAt != null || m.state === 'recording') return undefined
+      const n = store.notes(id)
+      return { fileName: fileNameFor(m.title, m.startedAt), markdown: toMarkdownFile(m, n.enhanced ?? n.mine, store.segments(id)) }
+    },
     meeting: id => {
       const m = store.meeting(id)
       if (!m || m.state !== 'done' || m.trashedAt) throw new Error('Choose a finished meeting')
@@ -601,7 +609,8 @@ app.whenReady().then(() => {
   })
   const folderSuggestions = createFolderSuggestions({ store, queue, model: projectWorkflows.model, changed: () => win?.webContents.send('folders:changed') })
   const notes = hookNotes({
-    summarized: id => folderSuggestions.schedule(id),
+    // the notes are written: suggest a folder, and write the meeting into the workspace folder when there is one
+    summarized: id => { folderSuggestions.schedule(id); void projectWorkflows.workspaceMeeting(id) },
     // Windows and Linux: a note waiting while the model loads says so (a Mac shows what it always did)
     showLoading: platform !== 'darwin',
     store, queue, model: projectWorkflows.model, language: meetingLanguage, onStop: onMeetingStopSaved, named: (id) => callNames.finished(id), earlier: (id) => readAhead.parts(id), me,

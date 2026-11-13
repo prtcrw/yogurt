@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronLeft, FolderOpen, LoaderCircle, Plus, RefreshCw, Upload } from 'lucide-react'
-import type { Project, ProjectJob, ProjectState, ProviderKind } from '../../../shared/projects'
+import { Bot, ChevronDown, ChevronLeft, FolderOpen, Inbox, LoaderCircle, Plus, RefreshCw, Square, Upload } from 'lucide-react'
+import type { AgentProvider, Project, ProjectJob, ProjectState, ProviderKind } from '../../../shared/projects'
 
 const providers: Array<[ProviderKind, string]> = [['local', 'Yogurt (on this computer)'], ['codex', 'Codex CLI'], ['claude', 'Claude Code CLI'], ['openai', 'OpenAI API'], ['anthropic', 'Anthropic API'], ['compatible', 'OpenAI-compatible (LM Studio, Ollama…)']]
 const languages = [['auto', 'Auto-detect'], ['en', 'English'], ['th', 'Thai'], ['ja', 'Japanese'], ['zh', 'Chinese'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['ko', 'Korean']]
+const agents: Array<[string, string]> = [['', 'Off'], ['claude', 'Claude Code'], ['codex', 'Codex']]
+const agentName = (a?: string) => a === 'codex' ? 'Codex' : 'Claude Code'
 const retentionLabel = { reference: 'Keep in place', archive: 'Move to archive', delete: 'Delete after export' }
 const stateLabel: Record<ProjectJob['state'], string> = { queued: 'Queued', running: 'Processing', review: 'Needs review', completed: 'Done', failed: 'Failed', cancelled: 'Cancelled' }
 const fresh = (): Project => ({ id: '', name: '', vault: '', folder: '.', output: 'Meetings', provider: 'local', model: '', endpoint: 'http://127.0.0.1:1234/v1', retention: 'reference', archive: '', contextFolders: ['.'], recognizeSpeakers: false, input: '', checkInput: false, speechLanguage: 'auto', followUps: true })
@@ -25,6 +27,8 @@ export function Projects({ back }: { back?: () => void }) {
   const [busy, setBusy] = useState(false)
   const [key, setKey] = useState('')
   const [savedNote, setSavedNote] = useState(false)
+  const [workspaceId, setWorkspaceId] = useState<string>()
+  useEffect(() => { void window.yogurt.workspace.state().then(s => setWorkspaceId(s.projectId)).catch(() => {}) }, [])
 
   const refresh = () => window.yogurt.projects.state().then(setState).catch(e => setError(message(e)))
   useEffect(() => { void window.yogurt.meetings.cards({ limit: 100 }).then(setMeetings).catch(() => {}) }, [])
@@ -117,8 +121,8 @@ export function Projects({ back }: { back?: () => void }) {
                 </div> : <p className="pj-quiet">{draft.checkInput && draft.input ? `No new recordings in ${baseName(draft.input)}.` : 'Nothing waiting. Turn on input-folder watching in Settings to pick up new recordings automatically.'}</p>}
               </Section>
 
-              <Section title="Processing & review">
-                {jobs.length ? <div className="pj-jobs">{jobs.map(job => <Job key={job.id} job={job} run={run} busy={busy} />)}</div>
+              <Section title="Processing & review" action={saved?.agent ? <button className="settings-link no-drag" onClick={() => void run(() => window.yogurt.projects.openInbox(selected))}><Inbox size={12} aria-hidden="true" />Open agent inbox</button> : undefined}>
+                {jobs.length ? <div className="pj-jobs">{jobs.map(job => <Job key={job.id} job={job} agent={state.projects.find(p => p.id === job.projectId)?.agent} run={run} busy={busy} />)}</div>
                   : <p className="pj-quiet">No recordings processed yet. Use <strong>Import files…</strong> or export a meeting below.</p>}
               </Section>
 
@@ -164,6 +168,11 @@ export function Projects({ back }: { back?: () => void }) {
                   </Row>
                 </div>
                 {outputPath && <p className="pj-quiet pj-ellipsis" title={outputPath}>Notes are saved to <code>{outputPath}</code></p>}
+                {selected && <div className="settings-group pj-gap">
+                  <Row label="Use as sidebar workspace" htmlFor="pj-sidebar" description={workspaceId === selected ? 'The sidebar shows this folder, and each finished Yogurt meeting is saved into the meeting subfolder. Edits made in Obsidian are never overwritten.' : 'Show this project folder in the sidebar instead of Yogurt’s own folders, and save finished meetings into it.'}>
+                    <Switch id="pj-sidebar" label="Use as sidebar workspace" checked={workspaceId === selected} onChange={on => { const before = workspaceId; setWorkspaceId(on ? selected : undefined); void run(async () => { try { await window.yogurt.workspace.use(on ? selected : null) } catch (e) { setWorkspaceId(before); throw e } }) }} />
+                  </Row>
+                </div>}
               </Section>
 
               <Section title="Summaries">
@@ -189,6 +198,23 @@ export function Projects({ back }: { back?: () => void }) {
                     {isDefault ? <span className="settings-permission-status">Default</span>
                       : <button className="workspace-button no-drag" disabled={busy || dirty} title={dirty ? 'Save the project first' : undefined} onClick={() => void run(() => window.yogurt.projects.defaultProvider(selected))}>Make default</button>}
                   </Row>}
+                </div>
+              </Section>
+
+              <Section title="Meeting agent">
+                <div className="settings-group">
+                  <Row label="Agent" htmlFor="pj-agent" description={draft.agent ? `After a meeting, Run agent lets ${agentName(draft.agent)} write minutes and plan next steps using your workspace. Uses your existing CLI sign-in.` : 'Off. Turn on to run Codex or Claude Code in this workspace after a meeting.'}>
+                    <Select id="pj-agent" aria="Meeting agent" value={draft.agent ?? ''} onChange={v => field('agent', v as AgentProvider | '')} options={agents} />
+                  </Row>
+                  {draft.agent && <>
+                    <Row label="Agent model" htmlFor="pj-agent-model" description="Leave blank for the CLI's default.">
+                      <input id="pj-agent-model" className="settings-name-field pj-input" value={draft.agentModel ?? ''} placeholder="Default" onChange={e => field('agentModel', e.target.value)} />
+                    </Row>
+                    <Row label="Agent inbox" htmlFor="pj-agent-inbox" description="Proposed edits to your kanban and notes land here for you to review. The agent never edits them directly.">
+                      <input id="pj-agent-inbox" className="settings-name-field pj-input" value={draft.agentInbox ?? 'Agent Inbox'} onChange={e => field('agentInbox', e.target.value)} />
+                    </Row>
+                    <p className="pj-inline-note">The agent reads the whole workspace but writes only to the meeting&rsquo;s folder and the agent inbox. Put a <code>YOGURT.md</code> (or <code>AGENTS.md</code> / <code>CLAUDE.md</code>) in the project folder to tell it where your kanban and knowledge base are and how you like minutes written.</p>
+                  </>}
                 </div>
               </Section>
 
@@ -290,7 +316,7 @@ function Switch({ id, label, checked, onChange }: { id: string; label?: string; 
   return <input id={id} type="checkbox" role="switch" aria-label={label} className="pj-switch-input" checked={checked} onChange={e => onChange(e.target.checked)} />
 }
 
-function Job({ job, run, busy }: { job: ProjectJob; run: (f: () => Promise<unknown>) => Promise<void>; busy: boolean }) {
+function Job({ job, agent, run, busy }: { job: ProjectJob; agent?: AgentProvider | ''; run: (f: () => Promise<unknown>) => Promise<void>; busy: boolean }) {
   const [names, setNames] = useState<Record<string, string>>({})
   const clusters = [...new Set(job.segments?.map(s => s.cluster ?? s.speaker ?? 'Unknown speaker'))]
   const reviewing = (job.state === 'review' || job.state === 'failed') && !!job.segments?.length
@@ -321,6 +347,23 @@ function Job({ job, run, busy }: { job: ProjectJob; run: (f: () => Promise<unkno
       </div>)}
       <div><button className="workspace-button primary no-drag" disabled={busy} onClick={() => void run(async () => { await window.yogurt.projects.speakers(job.id, names); await window.yogurt.projects.summarize(job.id) })}>Approve speakers and summarize</button></div>
     </div>}
+    {agent && job.transcript && ['completed', 'review'].includes(job.state) && <AgentBar job={job} agent={agent} run={run} busy={busy} />}
     {(job.transcript || job.notes) && <p className="pj-paths">{job.notes ? <>Notes: <code title={job.notes}>{job.notes}</code></> : <>Transcript: <code title={job.transcript}>{job.transcript}</code></>}</p>}
   </article>
+}
+
+function AgentBar({ job, agent, run, busy }: { job: ProjectJob; agent: AgentProvider; run: (f: () => Promise<unknown>) => Promise<void>; busy: boolean }) {
+  const a = job.agent
+  const running = a?.state === 'running'
+  const name = agentName(a?.provider ?? agent)
+  return <div className="pj-agent" data-state={a?.state ?? 'idle'}>
+    <span className="pj-agent-icon" aria-hidden="true">{running ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" /> : <Bot size={14} />}</span>
+    <div className="pj-agent-copy">
+      <div className="pj-agent-title">{running ? `${name} is working in your workspace…` : a?.state === 'done' ? `${name} finished` : a?.state === 'failed' ? `${name} couldn’t finish` : a?.state === 'stopped' ? 'Agent stopped' : 'Meeting agent'}</div>
+      <p className="settings-description">{a?.error ?? (a?.state === 'done' ? (a.report?.split('\n').find(l => l.trim()) ?? 'See agent-report.md in the meeting folder.') : running ? 'Writing minutes and next steps; proposals go to the agent inbox.' : `Write minutes, check the kanban and knowledge base, and plan next steps with ${name}.`)}</p>
+    </div>
+    {running
+      ? <button className="workspace-button no-drag" onClick={() => void run(() => window.yogurt.projects.stopAgent(job.id))}><Square size={11} aria-hidden="true" />Stop</button>
+      : <button className="workspace-button primary no-drag" disabled={busy} onClick={() => void run(() => window.yogurt.projects.runAgent(job.id))}>{a ? 'Run again' : 'Run agent'}</button>}
+  </div>
 }

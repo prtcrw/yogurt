@@ -12,6 +12,8 @@ import { RecordingTime } from './RecordingTime'
 import { FileText, MessageCircle, Search, Settings, SidebarToggle } from './Icons'
 import { FoldersNav } from './FoldersNav'
 import { FinishSetup } from './FinishSetup'
+import { WorkspaceTree } from './WorkspaceTree'
+import { fileOfRoute, useWorkspace } from '../workspaceFolder'
 
 export function Workspace({ route, meeting, folders, go, back, forward, search, collapsed, sidebarMotion, toggleSidebar, children }: {
   meeting?: Pick<MeetingView, 'id' | 'title'>
@@ -52,6 +54,7 @@ export function Workspace({ route, meeting, folders, go, back, forward, search, 
     window.addEventListener('keydown', key)
     return () => { off(); window.removeEventListener('keydown', key) }
   }, [route, go])
+  const workspace = useWorkspace()
   const links = [
     { route: '', label: t('Meetings'), Icon: FileText },
     { route: '/chat', label: t('Ask'), Icon: MessageCircle },
@@ -61,7 +64,8 @@ export function Workspace({ route, meeting, folders, go, back, forward, search, 
   ]
   const folder = route.startsWith('/folder/') ? folders?.find((s) => route === `/folder/${s.id}`) : undefined
   const current = links.find((link) => link.route === section) ?? (route.startsWith('/folder/') ? { label: folder?.name ?? t('Folder') } : undefined)
-  const label = note ? (meeting && route === `/note/${meeting.id}` ? meeting.title : t('Meeting')) : route === '/settings' ? t('Settings') : current?.label ?? t('Meetings')
+  const file = fileOfRoute(route)
+  const label = note ? (meeting && route === `/note/${meeting.id}` ? meeting.title : t('Meeting')) : file ? file.split('/').pop()!.replace(/\.md$/i, '') : route === '/settings' ? t('Settings') : current?.label ?? t('Meetings')
   const nav = (link: typeof links[number]) => <button key={link.route} data-testid={link.route === '' ? 'nav-home' : link.route === '/chat' ? 'nav-chat' : link.route === '/settings' ? 'settings-open' : link.route === '/projects' ? 'nav-projects' : 'nav-trash'}
     data-sidebar="menu-button" aria-label={link.label} title={collapsed ? link.label : undefined} className={`workspace-nav${link.route === '/trash' ? ' workspace-trash' : ''}`} aria-current={section === link.route || link.route === '' && route === '/meetings' ? 'page' : undefined} onClick={() => go(link.route)}>
     <link.Icon size={16} strokeWidth={1.75} aria-hidden="true" /><span>{link.label}</span>
@@ -84,8 +88,8 @@ export function Workspace({ route, meeting, folders, go, back, forward, search, 
       <div className="workspace-sidebar-body">
         <button className="workspace-search no-drag" data-testid="search-open" aria-label={t('Search')} title={`${t('Search')} (${keys('⌘K')})`} onClick={search}><Search size={16} strokeWidth={1.75} aria-hidden="true" /><span>{t('Search')}</span><kbd>{keys('⌘K')}</kbd></button>
         <nav aria-label={t('Workspace')}>{links.slice(0, 3).map(nav)}</nav>
-        <div className="workspace-folder-label">{t('Your workspace')}</div>
-        <FoldersNav collapsed={collapsed} folders={folders} route={route} go={go} />
+        <div className="workspace-folder-label" title={workspace?.root}>{workspace?.root ? workspace.name : t('Your workspace')}</div>
+        {workspace?.root ? <WorkspaceTree route={route} go={go} collapsed={collapsed} /> : <FoldersNav collapsed={collapsed} folders={folders} route={route} go={go} />}
       </div>
       <div className="workspace-sidebar-footer">
         <FinishSetup collapsed={collapsed} />

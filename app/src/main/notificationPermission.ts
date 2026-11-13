@@ -13,6 +13,8 @@ export function notificationIdentity(output: string): string | null {
   const requirement = output.match(/^(?:# )?designated => .+$/m)?.[0].replace(/^# /, '').trim()
   if (!requirement) return null
   if (/^designated => cdhash H"[0-9a-f]+"$/i.test(requirement)) return requirement
+  // a local build signed with its bundle ID alone (scripts/package-local.mjs), so it stays the same across rebuilds
+  if (/^designated => identifier "[^"]+"$/.test(requirement)) return requirement
   return /identifier "[^"]+"/.test(requirement) && /certificate |anchor |cdhash /.test(requirement) ? requirement : null
 }
 
