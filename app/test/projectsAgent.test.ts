@@ -24,7 +24,7 @@ async function rig(over: Partial<Project> = {}) {
 it('limits writes to the meeting folder and the agent inbox', async () => {
   const { project, job, meeting, vault } = await rig()
   const paths = agentPaths(project, job)
-  expect(paths).toEqual({ vault, workspace: join(vault, 'Team'), meeting, inbox: join(vault, 'Team', 'Agent Inbox') })
+  expect(paths).toEqual({ vault: join(vault, 'Team'), workspace: join(vault, 'Team'), meeting, inbox: join(vault, 'Team', 'Agent Inbox') })
 
   const codex = agentCommand('codex', paths, '', '/tmp/report.md')
   expect(codex.cwd).toBe(meeting)
@@ -48,7 +48,7 @@ it('rejects a transcript outside the vault and an inbox that is the workspace it
 
 it('prefers YOGURT.md in the project folder and passes it to the agent', async () => {
   const { project, job, vault } = await rig()
-  await writeFile(join(vault, 'CLAUDE.md'), 'vault rules')
+  await writeFile(join(vault, 'Team', 'CLAUDE.md'), 'other rules')
   await writeFile(join(vault, 'Team', 'YOGURT.md'), 'Kanban lives in Board.md')
   const paths = agentPaths(project, job)
   const found = await findInstructions(paths)

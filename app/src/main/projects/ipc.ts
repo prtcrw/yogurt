@@ -15,7 +15,10 @@ import { MeetingAgents } from './agent'
 import { WorkspaceFolder } from './workspace'
 
 export function hookProjects(d: { db: DatabaseSync; directory: string; workDirectory?: string; voiceDirectory?: string; executables?: { codexBinary?: string; claudeBinary?: string; ffmpegBinary?: string }; model: NotesModel; queue: Queue; unload(): Promise<void>; localSelected?(): void; fake?: boolean; asrModel(): string | undefined;
-  changed(): void; workspaceChanged?(): void; meetingMarkdown?(id: string): { fileName: string; markdown: string } | undefined; recording(): boolean; meeting(id: string): { title: string; segments: import('../../shared/projects').ProjectSegment[]; audio: string[] } }) {
+  changed(): void; workspaceChanged?(): void;
+  /** Yogurt's own folders: a name, the finished meetings in one, the folders a meeting is in, and making one */
+  folders?: { name(id: string): string | undefined; meetings(id: string): string[]; of(meetingId: string): string[]; create(name: string): string }
+  meetingMarkdown?(id: string): { folder: string; files: Record<string, string> } | undefined; recording(): boolean; meeting(id: string): { title: string; segments: import('../../shared/projects').ProjectSegment[]; audio: string[] } }) {
   const store = new ProjectStore(d.db)
   mkdirSync(d.directory, { recursive: true, mode: 0o700 })
   const secrets = join(d.directory, 'credentials.json')
@@ -67,26 +70,30 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; workDirec
     return 'Wrote minutes.md and one proposal.'
   } } : {}) })
   const workspace = new WorkspaceFolder({ store, file: join(d.directory, 'workspace.json'), changed: () => { d.workspaceChanged?.(); d.changed() } })
-  const saveMeeting = async (id: string) => {
+  const saveMeeting = async (id: string, projectId: string) => {
     const meeting = d.meetingMarkdown?.(id)
-    return meeting ? (await workspace.writeMeeting(id, meeting.fileName, meeting.markdown)) ?? null : null
+    return meeting ? workspace.writeMeeting(id, meeting.folder, meeting.files, projectId) : null
   }
+  const quietly = (work: Promise<unknown>) => work.catch(e => { console.warn('WORKSPACE could not write the meeting', e) })
+  /** a meeting was filed in a Yogurt folder: if that folder points at a folder on disk, the meeting is saved there */
+  const meetingFiled = (folderId: string, meetingId: string) => { const p = workspace.projectOf(folderId); return p ? quietly(saveMeeting(meetingId, p.id)) : Promise.resolve() }
+  /** a meeting's notes were written (again): every linked folder it is in gets the new files */
+  const meetingChanged = async (meetingId: string) => { for (const folderId of d.folders?.of(meetingId) ?? []) await meetingFiled(folderId, meetingId) }
+  const view = (projectId: string) => workspace.state().projects.find(p => p.id === projectId) ?? null
   ipcMain.handle('workspace:state', () => workspace.state())
-  ipcMain.handle('workspace:use', (_e, projectId: unknown) => workspace.use(typeof projectId === 'string' ? projectId : null))
-  ipcMain.handle('workspace:list', (_e, path: string) => workspace.list(path))
-  ipcMain.handle('workspace:read', (_e, path: string) => workspace.read(path))
-  ipcMain.handle('workspace:open', async (_e, path: string) => {
-    const file = workspace.absolute(path), state = workspace.state()
-    // Obsidian opens its own vault's notes by path; anything else goes to the default app
-    if (state.obsidian) { await shell.openExternal(`obsidian://open?path=${encodeURIComponent(file)}`); return }
-    const error = await shell.openPath(file); if (error) throw new Error(error)
+  ipcMain.handle('workspace:link', async (_e, folderId: string) => {
+    const name = d.folders?.name(folderId)
+    if (!name) throw new Error('This folder is gone')
+    const result = await dialog.showOpenDialog({ title: `Choose the folder on disk for “${name}”`, properties: ['openDirectory', 'createDirectory'] })
+    if (result.canceled) return null
+    const project = workspace.link(folderId, name, result.filePaths[0])!
+    // the meetings already in the folder go to disk too
+    for (const meetingId of d.folders?.meetings(folderId) ?? []) await quietly(saveMeeting(meetingId, project.id))
+    return view(project.id)
   })
-  ipcMain.handle('workspace:reveal', (_e, path: string) => { shell.showItemInFolder(workspace.absolute(path)) })
-  ipcMain.handle('workspace:saveMeeting', (_e, id: string) => saveMeeting(id))
-  ipcMain.handle('workspace:meetingFile', (_e, id: string) => {
-    const path = workspace.meetingPath(id), root = workspace.root()
-    return path && root && existsSync(path) ? relative(root, path).split(/[\\/]/).join('/') : null
-  })
+  ipcMain.handle('workspace:unlink', (_e, folderId: string) => { workspace.link(folderId, '', null) })
+  ipcMain.handle('workspace:reveal', async (_e, projectId: string) => { const error = await shell.openPath(workspace.root(projectId)); if (error) throw new Error(error) })
+  ipcMain.handle('workspace:saveMeeting', (_e, id: string, projectId: string) => saveMeeting(id, projectId))
   ipcMain.handle('projects:agent', (_e, id: string) => agents.start(id))
   ipcMain.handle('projects:agentStop', (_e, id: string) => agents.stop(id))
   ipcMain.handle('projects:openInbox', async (_e, projectId: string) => {
@@ -95,10 +102,13 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; workDirec
   })
   ipcMain.handle('projects:state', () => ({ inbox: inbox.pending(), inboxErrors: inbox.errors, projects: store.projects(), jobs: store.jobs(), profiles: store.profiles(), configured: Object.keys(readSecrets()), defaultProjectId: defaultProject()?.id }))
   ipcMain.handle('projects:folder', async () => {
-    const result = await dialog.showOpenDialog({ title: 'Choose a project, Obsidian vault, or external audio archive', properties: ['openDirectory', 'createDirectory'] })
+    const result = await dialog.showOpenDialog({ title: 'Choose a folder', properties: ['openDirectory', 'createDirectory'] })
     return result.canceled ? null : result.filePaths[0]
   })
-  ipcMain.handle('projects:save', async (_e, p: Project) => { const saved = store.save(p); if (defaultProject()?.id === saved.id) await atomic(preference, JSON.stringify({ defaultProjectId: saved.id, external: saved.provider !== 'local' })); void inbox.scan(); d.changed(); return saved })
+  ipcMain.handle('projects:save', async (_e, p: Project) => {
+    // a new project gets a Yogurt folder of the same name: filing a meeting there saves it to the project
+    if (!p.id && !p.yogurtFolder && d.folders && p.name?.trim()) { store.save({ ...p, id: 'check' }, true); p = { ...p, yogurtFolder: d.folders.create(p.name.trim()) } }
+    const saved = store.save(p); if (defaultProject()?.id === saved.id) await atomic(preference, JSON.stringify({ defaultProjectId: saved.id, external: saved.provider !== 'local' })); void inbox.scan(); d.workspaceChanged?.(); d.changed(); return saved })
   ipcMain.handle('projects:credential', async (_e, provider: ProviderKind, key: string) => {
     if (!['openai', 'anthropic', 'compatible'].includes(provider) || typeof key !== 'string' || key.length > 2000) throw new Error('Invalid provider key')
     if (!safeStorage.isEncryptionAvailable() || safeStorage.getSelectedStorageBackend?.() === 'basic_text') throw new Error('OS-backed credential storage is unavailable. Use a local model or signed-in CLI instead.')
@@ -163,5 +173,5 @@ export function hookProjects(d: { db: DatabaseSync; directory: string; workDirec
   const inboxTimer = setInterval(() => { void inbox.scan() }, 10000)
   void inbox.scan()
   workflow.resumeQueue()
-  return { model, externalSelected: () => !!defaultProject() && defaultProject()?.provider !== 'local', workspaceMeeting: (id: string) => saveMeeting(id).catch(e => { console.warn('WORKSPACE could not write the meeting', e) }), dispose: () => { clearInterval(timer); clearInterval(inboxTimer); workflow.dispose(); agents.dispose(); workspace.dispose() } }
+  return { model, externalSelected: () => !!defaultProject() && defaultProject()?.provider !== 'local', meetingFiled, meetingChanged, dispose: () => { clearInterval(timer); clearInterval(inboxTimer); workflow.dispose(); agents.dispose() } }
 }

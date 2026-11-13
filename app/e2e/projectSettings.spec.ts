@@ -45,7 +45,7 @@ test('input-folder checks ask first, skip files without changing them and import
     await app.evaluate(() => (globalThis as any).__fake__.go('/projects'))
     await page.getByLabel('Name', { exact: true }).fill('Test project')
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, vault)
-    await page.getByRole('button', { name: 'Choose vault folder', exact: true }).click()
+    await page.getByRole('button', { name: 'Choose project folder', exact: true }).click()
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, join(vault, 'Exports'))
     await page.getByRole('button', { name: 'Browse output folder…' }).click()
     await expect(page.getByLabel('Meeting output subfolder')).toHaveValue('Exports')

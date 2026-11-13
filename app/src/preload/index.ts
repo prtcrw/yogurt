@@ -7,13 +7,10 @@ const api: YogurtApi = {
   runtime: { models: () => ipcRenderer.invoke('runtime:models'), scanModels: () => ipcRenderer.invoke('runtime:scanModels'), scanModelFolder: () => ipcRenderer.invoke('runtime:scanModelFolder'), selectModels: selection => ipcRenderer.invoke('runtime:selectModels', selection), state: () => ipcRenderer.invoke('runtime:state'), save: value => ipcRenderer.invoke('runtime:save', value), pick: key => ipcRenderer.invoke('runtime:pick', key), open: key => ipcRenderer.invoke('runtime:open', key) },
   workspace: {
     state: () => ipcRenderer.invoke('workspace:state'),
-    use: projectId => ipcRenderer.invoke('workspace:use', projectId),
-    list: path => ipcRenderer.invoke('workspace:list', path),
-    read: path => ipcRenderer.invoke('workspace:read', path),
-    open: path => ipcRenderer.invoke('workspace:open', path),
-    reveal: path => ipcRenderer.invoke('workspace:reveal', path),
-    saveMeeting: id => ipcRenderer.invoke('workspace:saveMeeting', id),
-    meetingFile: id => ipcRenderer.invoke('workspace:meetingFile', id),
+    link: folderId => ipcRenderer.invoke('workspace:link', folderId),
+    unlink: folderId => ipcRenderer.invoke('workspace:unlink', folderId),
+    reveal: projectId => ipcRenderer.invoke('workspace:reveal', projectId),
+    saveMeeting: (id, projectId) => ipcRenderer.invoke('workspace:saveMeeting', id, projectId),
     onChange: cb => { const f = () => cb(); ipcRenderer.on('workspace:changed', f); return () => ipcRenderer.off('workspace:changed', f) },
   },
   projects: {

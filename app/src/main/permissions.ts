@@ -46,27 +46,40 @@ const ASK: Record<Exclude<PermissionKind, 'notifications'>, string> = { mic: 'mi
 export function createPermissions(d: { helper: Helper; notifications(): Access | Promise<Access>; askNotifications(): Promise<Access>; open(url: string): void
   /** Accessibility was asked for once already (the Mac's prompt only shows the first time) */
   axAsked?: () => boolean; setAxAsked?: () => void
+  /** Accessibility as the Mac sees Yogurt itself (prompt: also add Yogurt to the list). The helper is a separate
+   * program, so its own answer can differ from the app's; either one being trusted counts. */
+  appTrusted?: (prompt: boolean) => boolean
   /** the computer (default a Mac); Windows and Linux ask nothing (see offMac) */
   platform?: string
   /** Windows: the last recording said the mic is blocked (the recorder's no-mic) */
   micBlocked?: () => boolean }) {
   if (d.platform && d.platform !== 'darwin') return offMac(d.platform, d.open, d.micBlocked)
+  let lastAx: { app?: boolean; helper?: unknown } = {}
   const status = async (): Promise<PermissionStatus> => {
     let raw: unknown = null
     try { raw = await d.helper(['permissions']) } catch { /* no helper: nothing known */ }
-    return { ...parseStatus(raw, { axAsked: d.axAsked?.() }), notifications: await d.notifications() }
+    const parsed = parseStatus(raw, { axAsked: d.axAsked?.() })
+    if (d.appTrusted) {
+      const app = d.appTrusted(false), helper = (raw as { accessibility?: unknown } | null)?.accessibility
+      if (app !== lastAx.app || helper !== lastAx.helper) { console.info(`ACCESSIBILITY app=${app} helper=${String(helper)}`); lastAx = { app, helper } }
+      if (app) parsed.accessibility = 'granted'
+    }
+    return { ...parsed, notifications: await d.notifications() }
   }
   return {
     status,
     async request(kind: PermissionKind): Promise<Access> {
       if (kind === 'notifications') return d.askNotifications().catch(() => 'unknown' as const)
-      try { await d.helper([ASK[kind]]) } catch { return 'unknown' }
+      // Yogurt itself goes into the Accessibility list, the program the person recognizes and the one checked first
+      if (kind === 'accessibility') d.appTrusted?.(true)
+      try { await d.helper([ASK[kind]]) } catch { if (kind !== 'accessibility' || !d.appTrusted) return 'unknown' }
       if (kind === 'accessibility') d.setAxAsked?.()
       return (await status())[kind]
     },
     async openSettings(kind: PermissionKind) {
       if (kind === 'accessibility') {
         // A saved "asked" flag may belong to a prior app identity; register this one before showing its pane.
+        d.appTrusted?.(true)
         try { await d.helper(['ax-auth']); d.setAxAsked?.() } catch { /* Settings is still useful if the helper fails. */ }
       }
       d.open(SETTINGS_URL[kind])

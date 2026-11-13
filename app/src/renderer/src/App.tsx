@@ -21,8 +21,7 @@ import { ChatPage } from './screens/ChatPage'
 import { BootScreen } from './components/BootScreen'
 import { bootHoldMs } from '../../shared/onboarding'
 import { Folder } from './screens/Folder'
-import { WorkspaceFile } from './screens/WorkspaceFile'
-import { fileOfRoute, useWorkspace } from './workspaceFolder'
+import { useWorkspace } from './workspaceFolder'
 import { useFolders } from './folders'
 import type { LibrarySource, MeetingView, OnboardingPlan, SetupState } from '../../shared/types'
 
@@ -176,7 +175,7 @@ export function App() {
   }
 
   // before setup is done, projects open on their own page; afterwards inside the workspace like any other page
-  if (route === '/projects' && !(ready && !holding)) return <div className="h-full bg-bg text-ink"><TitleBar /><Projects back={() => go('')} /></div>
+  if ((route === '/projects' || route.startsWith('/project/')) && !(ready && !holding)) return <div className="h-full bg-bg text-ink"><TitleBar /><Projects back={() => go('')} /></div>
 
   if (setup?.phase === 'models') return <div data-testid="app-shell" className="h-full bg-bg text-ink"><TitleBar /><ModelSetup providers={() => go('/projects')} /></div>
 
@@ -190,9 +189,9 @@ export function App() {
   const folder = folderId ? folders?.find((s) => s.id === folderId) : undefined
   const suggestedFolder = noteId ? folders?.find((s) => s.id === suggestedFolders[noteId]) : undefined
   // a folder's page waits for the list; a folder that is gone shows Meetings
-  const folderScreen = folderId && (folder ? <Folder key={folder.id} folder={folder} open={open} onStarted={(id) => setSuggestedFolders((current) => ({ ...current, [id]: folder.id }))} /> : !folders ? <div className="native-folder"><StartRecording /><div className="native-library"><LoadingContent pending testId="meetings-loading" skeleton={<><div className="folder-page-heading"><h1><span className="loading-bar" style={{ width: 140 }} /></h1></div><MeetingListLoading showFolders={false} /></>} /></div></div> : null)
-  const filePath = fileOfRoute(route)
-  const screen = filePath ? <WorkspaceFile key={filePath} path={filePath} workspace={workspace} go={go} /> : route === '/projects' ? <Projects /> : settings ? <Settings revision={settingsRevision} /> : noteId ? <Note key={noteId} id={noteId} onSource={openSource} onTitleChange={setMeeting} at={jump?.id === noteId ? jump : undefined}
+  const folderScreen = folderId && (folder ? <Folder key={folder.id} folder={folder} open={open} go={go} project={workspace?.projects.find(p => p.folderId === folder.id)} onStarted={(id) => setSuggestedFolders((current) => ({ ...current, [id]: folder.id }))} /> : !folders ? <div className="native-folder"><StartRecording /><div className="native-library"><LoadingContent pending testId="meetings-loading" skeleton={<><div className="folder-page-heading"><h1><span className="loading-bar" style={{ width: 140 }} /></h1></div><MeetingListLoading showFolders={false} /></>} /></div></div> : null)
+  const projectId = route.startsWith('/project/') ? route.slice('/project/'.length) : undefined
+  const screen = projectId ? <Projects key={projectId} projectId={projectId} go={go} /> : route === '/projects' ? <Projects go={go} /> : settings ? <Settings revision={settingsRevision} /> : noteId ? <Note key={noteId} id={noteId} onSource={openSource} onTitleChange={setMeeting} at={jump?.id === noteId ? jump : undefined}
     folderSuggestion={suggestedFolder ? { folder: suggestedFolder, dismiss: () => dismissFolderSuggestion(noteId) } : undefined} />
     : chatId !== undefined ? <ChatPage id={chatId} go={go} openSource={openSource} />
     : trash ? <Trash open={open} /> : folderScreen || <Home open={open} openFolder={(id) => go(`/folder/${id}`)} />

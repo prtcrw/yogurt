@@ -533,3 +533,24 @@
 .ws-file-body a { color:var(--accent);text-decoration:underline;text-underline-offset:2px; }
 .ws-file-body code { font:12.5px var(--font-mono, ui-monospace, monospace);padding:1px 4px;border-radius:4px;background:var(--control); }
 .ws-file-body blockquote { padding-inline-start:12px;border-inline-start:3px solid var(--line);color:var(--muted); }
+.ws-project-row { position:relative; }
+.ws-project-row>.workspace-nav { padding-inline-end:34px; }
+.ws-project-toggle { position:absolute;inset-inline-end:5px;top:4px;width:27px;height:27px;display:grid;place-items:center;border-radius:6px; }
+.ws-project-dot { flex:none;width:6px;height:6px;margin-inline-start:auto;border-radius:50%;background:var(--accent); }
+.ws-tree-muted,.ws-tree-muted>svg { color:var(--muted); }
+.ws-file-crumb { color:inherit; }
+.ws-file-crumb:hover { color:var(--ink);text-decoration:underline; }
+.sidebar-collapsed .ws-project-toggle,.sidebar-collapsed .ws-tree-level,.sidebar-collapsed .ws-tree-empty { display:none; }
+.pj-layout { margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--float);font:11.5px/18px var(--font-mono, ui-monospace, monospace);color:var(--muted);overflow-x:auto;white-space:pre; }
+.ws-tree-row small { position:static;margin-inline-start:auto;padding-inline-start:6px;font-size:10px;visibility:visible !important; }
+
+/* A folder page: where its meetings are saved on disk */
+.folder-disk { display:flex;align-items:center;gap:8px;min-height:30px;margin:6px 0 14px;font-size:12px;line-height:18px;color:var(--muted); }
+.folder-disk>.settings-link,.folder-disk>.workspace-button { flex:none; }
+.folder-disk>svg { flex:none; }
+.folder-disk-hint { flex:none; }
+.folder-disk-path { flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;direction:rtl;text-align:start;font:11.5px var(--font-mono, ui-monospace, monospace);color:var(--written);border-radius:4px;padding:2px 4px; }
+.folder-disk-path>* { direction:ltr;unicode-bidi:embed; }
+.folder-disk-path i { font-style:normal;color:var(--muted); }
+.folder-disk-path:hover { background:var(--control-hover); }
+.folder-disk-error { flex-basis:100%;color:var(--danger); }

@@ -11,6 +11,9 @@ const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const bundle = join(appDir, 'dist/mac-arm64/Yogurt Projects.app')
 const appId = readFileSync(join(appDir, 'electron-builder.yml'), 'utf8').match(/^appId:\s*(\S+)/m)?.[1]
 if (!appId) throw new Error('electron-builder.yml has no appId')
+// Package what the source says now, never an older out/ left by a previous build
+const compiled = spawnSync('pnpm', ['exec', 'electron-vite', 'build'], { cwd: appDir, stdio: 'inherit' })
+if (compiled.status !== 0) process.exit(compiled.status ?? 1)
 const packaged = spawnSync('pnpm', ['exec', 'electron-builder', '--mac', '--arm64', '--dir', '--publish', 'never'], {
   cwd: appDir, stdio: 'inherit', env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
 })

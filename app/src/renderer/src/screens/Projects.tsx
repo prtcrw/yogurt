@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Bot, ChevronDown, ChevronLeft, FolderOpen, Inbox, LoaderCircle, Plus, RefreshCw, Square, Upload } from 'lucide-react'
 import type { AgentProvider, Project, ProjectJob, ProjectState, ProviderKind } from '../../../shared/projects'
+import { useFolders } from '../folders'
 
 const providers: Array<[ProviderKind, string]> = [['local', 'Yogurt (on this computer)'], ['codex', 'Codex CLI'], ['claude', 'Claude Code CLI'], ['openai', 'OpenAI API'], ['anthropic', 'Anthropic API'], ['compatible', 'OpenAI-compatible (LM Studio, Ollama…)']]
 const languages = [['auto', 'Auto-detect'], ['en', 'English'], ['th', 'Thai'], ['ja', 'Japanese'], ['zh', 'Chinese'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['ko', 'Korean']]
@@ -15,7 +16,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).rep
 type Tab = 'activity' | 'settings'
 
 /** Obsidian projects: what is waiting and in progress on one tab, how the project is set up on the other. */
-export function Projects({ back }: { back?: () => void }) {
+export function Projects({ back, projectId, go }: { back?: () => void; /** the project to show ('new': a blank one); none: the last one used */ projectId?: string; go?: (route: string) => void }) {
   const [state, setState] = useState<ProjectState>({ projects: [], jobs: [], profiles: [], configured: [] })
   const [loaded, setLoaded] = useState(false)
   const [meetings, setMeetings] = useState<Array<{ id: string; title: string }>>([])
@@ -27,8 +28,7 @@ export function Projects({ back }: { back?: () => void }) {
   const [busy, setBusy] = useState(false)
   const [key, setKey] = useState('')
   const [savedNote, setSavedNote] = useState(false)
-  const [workspaceId, setWorkspaceId] = useState<string>()
-  useEffect(() => { void window.yogurt.workspace.state().then(s => setWorkspaceId(s.projectId)).catch(() => {}) }, [])
+  const folders = useFolders()
 
   const refresh = () => window.yogurt.projects.state().then(setState).catch(e => setError(message(e)))
   useEffect(() => { void window.yogurt.meetings.cards({ limit: 100 }).then(setMeetings).catch(() => {}) }, [])
@@ -37,7 +37,7 @@ export function Projects({ back }: { back?: () => void }) {
       setState(data); setLoaded(true)
       let last: string | null = null
       try { last = localStorage.getItem('yogurt.lastProject') } catch { /* storage may be unavailable */ }
-      const project = data.projects.find(p => p.id === (last || data.defaultProjectId)) ?? data.projects[0]
+      const project = projectId === 'new' ? undefined : data.projects.find(p => p.id === (projectId || last || data.defaultProjectId)) ?? data.projects[0]
       if (project) { setDraft(project); setSelected(project.id) } else setTab('settings')
     }).catch(e => { setError(message(e)); setLoaded(true) })
     return window.yogurt.projects.onChange(() => { void refresh() })
@@ -51,6 +51,8 @@ export function Projects({ back }: { back?: () => void }) {
   const field = <K extends keyof Project>(name: K, value: Project[K]) => { setDraft(p => ({ ...p, [name]: value })); setSavedNote(false) }
   const folder = (name: 'vault' | 'archive' | 'input') => run(async () => { const path = await window.yogurt.projects.chooseFolder(); if (path) field(name, path) })
   const choose = (id: string) => {
+    // inside the app each project has its own page, the same one its sidebar row opens
+    if (go) { go(id === '__new__' ? '/project/new' : `/project/${id}`); return }
     if (id === '__new__') { setDraft(fresh()); setSelected(''); setTab('settings'); return }
     const p = state.projects.find(x => x.id === id); if (p) { setDraft(p); setSelected(p.id) }
   }
@@ -60,11 +62,11 @@ export function Projects({ back }: { back?: () => void }) {
   const inbox = (state.inbox ?? []).filter(item => !selected || item.projectId === selected)
   const jobs = state.jobs.filter(j => !selected || j.projectId === selected)
   const attention = inbox.length + jobs.filter(j => j.state === 'review').length
-  const outputPath = draft.vault ? [draft.vault, draft.folder === '.' ? '' : draft.folder, draft.output].filter(Boolean).join('/') : ''
+  const outputPath = draft.vault ? [draft.vault, draft.output].filter(Boolean).join('/') : ''
   const apiKey = ['openai', 'anthropic', 'compatible'].includes(draft.provider)
   const isDefault = !!selected && state.defaultProjectId === selected
 
-  const save = () => run(async () => { const p = await window.yogurt.projects.save(draft); setDraft(p); setSelected(p.id); setSavedNote(true) })
+  const save = () => run(async () => { const created = !selected; const p = await window.yogurt.projects.save(draft); setDraft(p); setSelected(p.id); setSavedNote(true); if (created && go && projectId === 'new') go(`/project/${p.id}`) })
 
   return (
     <div data-testid="projects" className="settings-screen pj">
@@ -75,7 +77,7 @@ export function Projects({ back }: { back?: () => void }) {
           <header className="pj-header">
             <div className="pj-header-copy">
               <h1 className="settings-heading">Projects</h1>
-              <p className="settings-intro">Turn recordings into transcripts and notes in your Obsidian vault.</p>
+              <p className="settings-intro">Each project is a folder of meeting transcripts and summaries on your computer.</p>
             </div>
             {state.projects.length > 0 && <div className="pj-header-actions">
               <span className="settings-select-wrap">
@@ -147,32 +149,29 @@ export function Projects({ back }: { back?: () => void }) {
               {!selected && <div className="pj-intro">
                 <Plus size={16} aria-hidden="true" />
                 <div><strong>{state.projects.length ? 'New project' : 'Create your first project'}</strong>
-                  <p>Pick an Obsidian vault and where meeting notes should go. Everything else has sensible defaults.</p></div>
+                  <p>Pick the folder this project lives in. It gets a folder in Yogurt’s sidebar: meetings you file there are saved to disk.</p></div>
               </div>}
 
-              <Section title="Where notes go">
+              <Section title="Project">
                 <div className="settings-group">
                   <Row label="Name" htmlFor="pj-name">
                     <input id="pj-name" className="settings-name-field pj-input" value={draft.name} placeholder="e.g. Research team" onChange={e => field('name', e.target.value)} />
                   </Row>
-                  <Row label="Obsidian vault" description={draft.vault || 'Not chosen yet'} title={draft.vault}>
-                    <button aria-label="Choose vault folder" className="workspace-button no-drag" disabled={busy} onClick={() => void folder('vault')}><FolderOpen size={13} aria-hidden="true" />{draft.vault ? 'Change…' : 'Choose…'}</button>
+                  <Row label="Project folder" description={draft.vault || 'Not chosen yet'} title={draft.vault}>
+                    <button aria-label="Choose project folder" className="workspace-button no-drag" disabled={busy} onClick={() => void run(async () => { const path = await window.yogurt.projects.chooseFolder(); if (path) setDraft(p => ({ ...p, vault: path, folder: '.' })) })}><FolderOpen size={13} aria-hidden="true" />{draft.vault ? 'Change…' : 'Choose…'}</button>
                   </Row>
-                  <Row label="Project folder" htmlFor="pj-folder" description="Inside the vault. Use . for the vault itself.">
-                    <PathInput id="pj-folder" value={draft.folder} placeholder="NIST/MLLO" onChange={v => field('folder', v)}
-                      browse={{ label: 'Browse project folder…', disabled: !draft.vault || busy, onClick: () => void run(async () => { const path = await window.yogurt.projects.chooseProjectFolder(draft, 'project'); if (path) field('folder', path) }) }} />
-                  </Row>
-                  <Row label="Meeting output subfolder" htmlFor="pj-output" description="Inside the project folder.">
-                    <PathInput id="pj-output" value={draft.output} onChange={v => field('output', v)}
+                  <Row label="Meetings folder" htmlFor="pj-output" description="Inside the project folder. Each meeting gets its own dated folder here.">
+                    <PathInput id="pj-output" aria="Meeting output subfolder" value={draft.output} onChange={v => field('output', v)}
                       browse={{ label: 'Browse output folder…', disabled: !draft.vault || busy, onClick: () => void run(async () => { const path = await window.yogurt.projects.chooseProjectFolder(draft, 'output'); if (path) field('output', path) }) }} />
                   </Row>
                 </div>
-                {outputPath && <p className="pj-quiet pj-ellipsis" title={outputPath}>Notes are saved to <code>{outputPath}</code></p>}
-                {selected && <div className="settings-group pj-gap">
-                  <Row label="Use as sidebar workspace" htmlFor="pj-sidebar" description={workspaceId === selected ? 'The sidebar shows this folder, and each finished Yogurt meeting is saved into the meeting subfolder. Edits made in Obsidian are never overwritten.' : 'Show this project folder in the sidebar instead of Yogurt’s own folders, and save finished meetings into it.'}>
-                    <Switch id="pj-sidebar" label="Use as sidebar workspace" checked={workspaceId === selected} onChange={on => { const before = workspaceId; setWorkspaceId(on ? selected : undefined); void run(async () => { try { await window.yogurt.workspace.use(on ? selected : null) } catch (e) { setWorkspaceId(before); throw e } }) }} />
+                {outputPath && <pre className="pj-layout" title={outputPath}>{`${baseName(draft.vault)}/\n  ${draft.output}/\n    2026-11-13 Weekly sync/\n      summary.md      notes, linked to the meeting in Yogurt\n      transcript.md\n  ${draft.agentInbox || 'Agent Inbox'}/     proposals from the meeting agent`}</pre>}
+                <div className="settings-group pj-gap">
+                  <Row label="Yogurt folder" htmlFor="pj-yogurt-folder" description={draft.yogurtFolder ? 'Meetings filed in this folder are saved into the project folder, each in its own dated folder.' : selected ? 'Not linked: Yogurt meetings are not saved here.' : 'A folder with the project’s name is added to the sidebar.'}>
+                    {selected ? <Select id="pj-yogurt-folder" value={draft.yogurtFolder ?? ''} onChange={v => field('yogurtFolder', v)} options={[['', 'None'], ...(folders ?? []).map(f => [f.id, f.name] as [string, string])]} />
+                      : <span className="settings-permission-status">Created with the project</span>}
                   </Row>
-                </div>}
+                </div>
               </Section>
 
               <Section title="Summaries">
@@ -235,7 +234,7 @@ export function Projects({ back }: { back?: () => void }) {
 
               <Section title="After processing">
                 <div className="settings-group">
-                  <Row label="Original audio" htmlFor="pj-retention" description={draft.retention === 'delete' ? 'Deleted only after the transcript and notes are safely saved.' : draft.retention === 'archive' ? 'Moved to a folder outside the vault.' : 'Stays where it is; notes link to it.'}>
+                  <Row label="Original audio" htmlFor="pj-retention" description={draft.retention === 'delete' ? 'Deleted only after the transcript and notes are safely saved.' : draft.retention === 'archive' ? 'Moved to a folder outside the project.' : 'Stays where it is; notes link to it.'}>
                     <Select id="pj-retention" value={draft.retention} onChange={v => field('retention', v as Project['retention'])} options={Object.entries(retentionLabel)} />
                   </Row>
                   {draft.retention === 'archive' && <Row label="Audio archive" description={draft.archive || 'Not chosen yet'} title={draft.archive}>
@@ -269,7 +268,7 @@ export function Projects({ back }: { back?: () => void }) {
         <span className="pj-quiet">{savedNote && !dirty ? 'Saved.' : dirty ? (selected ? 'Unsaved changes' : 'New project') : 'All changes saved'}</span>
         <div className="pj-row-actions">
           {dirty && selected && <button className="workspace-button no-drag" disabled={busy} onClick={() => saved && setDraft(saved)}>Discard</button>}
-          <button className="workspace-button primary no-drag" disabled={busy || !dirty || !draft.name.trim() || !draft.vault} title={!draft.vault ? 'Choose an Obsidian vault first' : undefined} onClick={() => void save()}>
+          <button className="workspace-button primary no-drag" disabled={busy || !dirty || !draft.name.trim() || !draft.vault} title={!draft.vault ? 'Choose a project folder first' : undefined} onClick={() => void save()}>
             {busy && <LoaderCircle size={13} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}{selected ? 'Save project' : 'Create project'}
           </button>
         </div>
@@ -295,9 +294,9 @@ function Row({ label, htmlFor, description, title, children }: { label: string; 
   </div>
 }
 
-function PathInput({ id, value, placeholder, onChange, browse }: { id: string; value: string; placeholder?: string; onChange(v: string): void; browse: { label: string; disabled: boolean; onClick(): void } }) {
+function PathInput({ id, aria, value, placeholder, onChange, browse }: { id: string; aria?: string; value: string; placeholder?: string; onChange(v: string): void; browse: { label: string; disabled: boolean; onClick(): void } }) {
   return <div className="pj-row-actions">
-    <input id={id} className="settings-name-field pj-input" value={value} placeholder={placeholder} spellCheck={false} autoComplete="off" onChange={e => onChange(e.target.value)} />
+    <input id={id} aria-label={aria} className="settings-name-field pj-input" value={value} placeholder={placeholder} spellCheck={false} autoComplete="off" onChange={e => onChange(e.target.value)} />
     <button aria-label={browse.label} title={browse.label} className="workspace-button pj-icon no-drag" disabled={browse.disabled} onClick={browse.onClick}><FolderOpen size={13} aria-hidden="true" /></button>
   </div>
 }

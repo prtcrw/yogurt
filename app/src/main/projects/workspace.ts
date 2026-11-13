@@ -1,131 +1,89 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, watch, type FSWatcher } from 'node:fs'
-import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
-import { join, relative, sep } from 'node:path'
-import type { WorkspaceEntry, WorkspaceFile, WorkspaceState } from '../../shared/projects'
+import { existsSync, readFileSync } from 'node:fs'
+import { mkdir, readFile } from 'node:fs/promises'
+import { dirname, join, sep } from 'node:path'
+import type { Project, WorkspaceState } from '../../shared/projects'
 import { atomic, inside } from './files'
 import type { ProjectStore } from './store'
 
-/** Folders that belong to tools, not to the person's notes */
-const HIDDEN = new Set(['.obsidian', '.git', '.trash', 'node_modules', '.DS_Store'])
-const MAX_ENTRIES = 500
-const MAX_READ = 2_000_000
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
 const toRel = (path: string) => path.split(sep).join('/')
+/** the folder is an Obsidian vault, or inside one */
+const inVault = (path: string): boolean => existsSync(join(path, '.obsidian')) || (dirname(path) !== path && inVault(dirname(path)))
 
-type Written = { path: string; hash: string }
-type Saved = { projectId?: string; meetings?: Record<string, Written> }
+/** A meeting's folder on disk, and what Yogurt last wrote to each file in it */
+type Written = { path: string; files: Record<string, string> }
+/** written: by meeting, then by project */
+type Saved = { written?: Record<string, Record<string, Written>> }
 
 /**
- * A project folder used as the sidebar workspace. The folder is the source of truth: Yogurt lists and reads it as it
- * is, writes each finished meeting into the project's meeting folder, and never overwrites a file edited elsewhere.
+ * Yogurt folders that point at a folder on disk. Each linked folder is a project: its meetings are written there, one
+ * dated folder per meeting, and the disk folder stays the source of truth (a file edited elsewhere is never overwritten).
  */
 export class WorkspaceFolder {
-  private watcher?: FSWatcher
-  private timer?: NodeJS.Timeout
-  constructor(private d: { store: ProjectStore; file: string; changed(): void }) { this.watch() }
+  constructor(private d: { store: ProjectStore; file: string; changed(): void }) {}
 
   private saved(): Saved { try { return JSON.parse(readFileSync(this.d.file, 'utf8')) } catch { return {} } }
-  private project() {
-    const id = this.saved().projectId
-    if (!id) return undefined
-    try { return this.d.store.project(id) } catch { return undefined }
-  }
-  /** the workspace folder on disk, or undefined when Yogurt's own folders are used */
-  root(): string | undefined {
-    const p = this.project()
-    if (!p) return undefined
-    try { return inside(p.vault, p.folder || '.') } catch { return undefined }
-  }
+  private rootOf(p: Project): string | undefined { try { return inside(p.vault, p.folder || '.') } catch { return undefined } }
+
   state(): WorkspaceState {
-    const p = this.project(), root = this.root()
-    return p && root ? { projectId: p.id, name: p.name, root, obsidian: existsSync(join(p.vault, '.obsidian')) } : {}
+    return { projects: this.d.store.projects().flatMap(p => {
+      const root = this.rootOf(p)
+      return root ? [{ id: p.id, name: p.name, root, output: toRel(p.output || 'Meetings'), obsidian: inVault(root), ...(p.yogurtFolder ? { folderId: p.yogurtFolder } : {}) }] : []
+    }) }
   }
-  async use(projectId: string | null) {
-    if (projectId) this.d.store.project(projectId)
-    await atomic(this.d.file, JSON.stringify({ ...this.saved(), projectId: projectId ?? undefined }))
-    this.watch(); this.d.changed()
-  }
+  /** the project a Yogurt folder points at */
+  projectOf(folderId: string): Project | undefined { return this.d.store.projects().find(p => p.yogurtFolder === folderId) }
 
-  /** A path the window gave, resolved inside the workspace (never outside it, never through a symlink out) */
-  private resolve(rel: string) {
-    const root = this.root()
-    if (!root) throw new Error('Choose a workspace folder first')
-    if (typeof rel !== 'string' || rel.includes('\0')) throw new Error('Invalid path')
-    return { root, path: inside(root, rel || '.') }
+  /** Point a Yogurt folder at a folder on disk (a new project, or its project moved), or stop (null; the project stays). */
+  link(folderId: string, name: string, path: string | null): Project | undefined {
+    const existing = this.projectOf(folderId)
+    let project: Project | undefined
+    if (path === null) { if (existing) this.d.store.save({ ...existing, yogurtFolder: '' }) }
+    else project = this.d.store.save(existing ? { ...existing, vault: path, folder: '.' }
+      : { id: '', name, vault: path, folder: '.', output: 'Meetings', provider: 'local', model: '', endpoint: 'http://127.0.0.1:1234/v1', retention: 'reference', archive: '', contextFolders: ['.'], yogurtFolder: folderId })
+    this.d.changed()
+    return project
   }
-
-  /** One folder's contents: folders first, then Markdown files, by name */
-  async list(rel = ''): Promise<WorkspaceEntry[]> {
-    const { root, path } = this.resolve(rel)
-    const entries = await readdir(path, { withFileTypes: true })
-    const out: WorkspaceEntry[] = []
-    for (const e of entries) {
-      if (out.length >= MAX_ENTRIES) break
-      if (e.name.startsWith('.') || HIDDEN.has(e.name)) continue
-      const full = join(path, e.name)
-      if (e.isDirectory()) out.push({ name: e.name, path: toRel(relative(root, full)), kind: 'folder' })
-      else if (e.isFile() && /\.md$/i.test(e.name)) out.push({ name: e.name.replace(/\.md$/i, ''), path: toRel(relative(root, full)), kind: 'file' })
-    }
-    return out.sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.kind === 'folder' ? -1 : 1)
-  }
-
-  async read(rel: string): Promise<WorkspaceFile> {
-    const { path } = this.resolve(rel)
-    if (!/\.md$/i.test(path)) throw new Error('Only Markdown files open here')
-    const info = await stat(path)
-    if (!info.isFile()) throw new Error('Not a file')
-    if (info.size > MAX_READ) throw new Error('This file is too large to show here; open it in your editor')
-    const text = await readFile(path, 'utf8')
-    const meeting = Object.entries(this.saved().meetings ?? {}).find(([, w]) => w.path === path)?.[0]
-    return { path: rel, absolute: path, text, modified: info.mtimeMs, ...(meeting ? { meetingId: meeting } : {}) }
-  }
-
-  absolute(rel: string) { return this.resolve(rel).path }
 
   /**
-   * Writes a finished meeting into the project's meeting folder. A file someone edited since Yogurt last wrote it is
-   * left alone (the folder is the source of truth); a new name is used instead of overwriting anything else.
+   * Writes a meeting as its own folder in a project's meetings folder. A file someone edited since Yogurt last wrote
+   * it is left alone; files others added (the agent's minutes) are untouched; a taken folder name gets a number.
    */
-  async writeMeeting(id: string, fileName: string, markdown: string): Promise<{ path: string; skipped?: 'edited' } | undefined> {
-    const p = this.project(), root = this.root()
-    if (!p || !root) return undefined
-    const folder = inside(root, p.output || 'Meetings')
-    await mkdir(folder, { recursive: true })
-    const saved = this.saved(), meetings = { ...saved.meetings }
-    const previous = meetings[id]
-    let target = previous?.path && existsSync(previous.path) ? previous.path : undefined
-    if (target) {
-      const current = await readFile(target, 'utf8')
-      if (hash(current) !== previous!.hash) return { path: target, skipped: 'edited' }
-      if (current === markdown) return { path: target }
-    } else {
-      const base = fileName.replace(/\.md$/i, '')
-      for (let n = 1; ; n++) {
-        const candidate = inside(folder, n === 1 ? `${base}.md` : `${base} (${n}).md`)
-        if (!existsSync(candidate)) { target = candidate; break }
-      }
+  async writeMeeting(id: string, folderName: string, files: Record<string, string>, projectId: string): Promise<{ path: string; projectId: string; skipped?: string[] }> {
+    const p = this.d.store.project(projectId), root = this.rootOf(p)
+    if (!root) throw new Error('This project folder is not available')
+    const saved = this.saved(), written = { ...saved.written }, mine = { ...written[id] }
+    const previous = mine[p.id]
+    const parent = inside(root, p.output || 'Meetings')
+    await mkdir(parent, { recursive: true })
+    let dir = previous && existsSync(previous.path) && previous.path.startsWith(parent + sep) ? previous.path : undefined
+    if (!dir) for (let n = 1; ; n++) {
+      const candidate = inside(parent, n === 1 ? folderName : `${folderName} (${n})`)
+      if (!existsSync(candidate)) { dir = candidate; break }
     }
-    await atomic(target, markdown)
-    meetings[id] = { path: target, hash: hash(markdown) }
-    await atomic(this.d.file, JSON.stringify({ ...saved, meetings }))
-    return { path: target }
+    await mkdir(dir, { recursive: true })
+    const hashes: Record<string, string> = dir === previous?.path ? { ...previous.files } : {}, skipped: string[] = []
+    for (const [name, text] of Object.entries(files)) {
+      const target = inside(dir, name)
+      const current = await readFile(target, 'utf8').catch(() => undefined)
+      if (current !== undefined && hash(current) !== hashes[name]) { skipped.push(name); continue }
+      if (current !== text) await atomic(target, text)
+      hashes[name] = hash(text)
+    }
+    mine[p.id] = { path: dir, files: hashes }; written[id] = mine
+    await atomic(this.d.file, JSON.stringify({ ...saved, written }))
+    return { path: dir, projectId: p.id, ...(skipped.length ? { skipped } : {}) }
   }
 
-  /** where a meeting was written, if it was */
-  meetingPath(id: string) { return this.saved().meetings?.[id]?.path }
-
-  private watch() {
-    this.watcher?.close(); this.watcher = undefined
-    const root = this.root()
-    if (!root) return
-    try {
-      this.watcher = watch(root, { recursive: true }, (_event, name) => {
-        if (name && String(name).split(/[\\/]/).some(part => part.startsWith('.') || HIDDEN.has(part))) return
-        clearTimeout(this.timer); this.timer = setTimeout(() => this.d.changed(), 250)
-      })
-      this.watcher.on('error', () => { this.watcher?.close(); this.watcher = undefined })
-    } catch { /* listing still works; it just won't refresh by itself */ }
+  /** where a meeting is on disk, per project it was written to (only folders that are still there) */
+  meetingFolders(id: string): Array<{ projectId: string; path: string }> {
+    return Object.entries(this.saved().written?.[id] ?? {}).filter(([, w]) => existsSync(w.path)).map(([projectId, w]) => ({ projectId, path: w.path }))
   }
-  dispose() { this.watcher?.close(); clearTimeout(this.timer) }
+  /** a project's folder on disk, for showing it in Finder */
+  root(projectId: string) {
+    const root = this.rootOf(this.d.store.project(projectId))
+    if (!root) throw new Error('This project folder is not available')
+    return root
+  }
 }

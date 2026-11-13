@@ -205,6 +205,6 @@ export class Workflows {
     await this.exportTranscript(job, retained.uri, retained.status)
     await rm(wav, { force: true })
     await rm(join(folder, 'samples'), { force: true, recursive: true })
-    this.update(job.id, { voiceSamples: undefined, state: 'completed', stage: 'Exported to Obsidian', notes: join(out, 'notes.md') })
+    this.update(job.id, { voiceSamples: undefined, state: 'completed', stage: 'Saved to the project folder', notes: join(out, 'notes.md') })
   }
 }

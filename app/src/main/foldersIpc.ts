@@ -7,7 +7,7 @@ import type { Store } from './store'
  * Folders: named folders of meetings, from the sidebar, a note's menu and its header chip. Every change tells the
  * windows (changed), so the sidebar, a folder's page and an open note all follow.
  */
-export function hookFolders(d: { store: Store; changed: () => void }) {
+export function hookFolders(d: { store: Store; changed: () => void; added?: (folderId: string, meetingId: string) => void }) {
   const { store } = d
   const folder = (id: unknown): id is string => isId(id) && !!store.folder(id)
   const meeting = (id: unknown): id is string => isId(id) && !!store.meeting(id)
@@ -43,6 +43,6 @@ export function hookFolders(d: { store: Store; changed: () => void }) {
   })
   // its meetings stay
   ipcMain.handle('folders:delete', (_e, id: unknown) => { if (folder(id)) { store.deleteFolder(id); d.changed() } })
-  ipcMain.handle('folders:add', (_e, id: unknown, meetingId: unknown) => { if (folder(id) && meeting(meetingId)) { store.addToFolder(id, meetingId); d.changed() } })
+  ipcMain.handle('folders:add', (_e, id: unknown, meetingId: unknown) => { if (folder(id) && meeting(meetingId)) { store.addToFolder(id, meetingId); d.changed(); d.added?.(id, meetingId) } })
   ipcMain.handle('folders:remove', (_e, id: unknown, meetingId: unknown) => { if (isId(id) && isId(meetingId)) { store.removeFromFolder(id, meetingId); d.changed() } })
 }

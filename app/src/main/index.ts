@@ -14,7 +14,7 @@ import { x11Relaunch } from './display'
 import { isAppRoute } from '../shared/routes'
 import { relaunchOptions, stripAppImageEnv } from './relaunch'
 import { capabilities, micListHelper, platformOf, supportedKinds } from '../shared/platform'
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, protocol, shell, systemPreferences } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { basename, join } from 'node:path'
@@ -72,7 +72,7 @@ import { createEmbedder } from './library/embedder'
 import { createIndexer } from './library/indexer'
 import { hookConversations } from './library/conversations'
 import { hookShare } from './share'
-import { fileNameFor, toMarkdownFile } from '../shared/exportNotes'
+import { folderNameFor, toMeetingFiles } from '../shared/exportNotes'
 import { hookBackup } from './backupIpc'
 import { hookFolders } from './foldersIpc'
 import { hookMcp } from './mcp'
@@ -218,6 +218,7 @@ const permissions = createPermissions({
   open: (url) => { if (isFake()) systemSettings.push(url); else void shell.openExternal(url) },
   axAsked: () => !!loadSettings(join(userDataDir(), 'settings.json')).axAsked,
   setAxAsked: () => updateSettings(join(userDataDir(), 'settings.json'), { axAsked: true }),
+  ...(isFake() || process.platform !== 'darwin' ? {} : { appTrusted: (prompt: boolean) => systemPreferences.isTrustedAccessibilityClient(prompt) }),
   platform, micBlocked: () => micBlocked,
 })
 
@@ -582,11 +583,17 @@ app.whenReady().then(() => {
     asrModel: () => setup.installed()?.asr, recording: () => !!activeMeeting(),
     changed: () => win?.webContents.send('projects:changed'),
     workspaceChanged: () => win?.webContents.send('workspace:changed'),
+    folders: {
+      name: id => store.folder(id)?.name,
+      meetings: id => store.folderMeetingIds(id).filter(m => store.meeting(m)?.state === 'done'),
+      of: meetingId => store.foldersOf(meetingId).map(f => f.id),
+      create: name => { const f = store.createFolder(name); win?.webContents.send('folders:changed'); return f.id },
+    },
     meetingMarkdown: id => {
       const m = store.meeting(id)
       if (!m || m.trashedAt != null || m.state === 'recording') return undefined
       const n = store.notes(id)
-      return { fileName: fileNameFor(m.title, m.startedAt), markdown: toMarkdownFile(m, n.enhanced ?? n.mine, store.segments(id)) }
+      return { folder: folderNameFor(m.title, m.startedAt), files: toMeetingFiles(m, n.enhanced ?? n.mine, store.segments(id)) }
     },
     meeting: id => {
       const m = store.meeting(id)
@@ -610,7 +617,7 @@ app.whenReady().then(() => {
   const folderSuggestions = createFolderSuggestions({ store, queue, model: projectWorkflows.model, changed: () => win?.webContents.send('folders:changed') })
   const notes = hookNotes({
     // the notes are written: suggest a folder, and write the meeting into the workspace folder when there is one
-    summarized: id => { folderSuggestions.schedule(id); void projectWorkflows.workspaceMeeting(id) },
+    summarized: id => { folderSuggestions.schedule(id); void projectWorkflows.meetingChanged(id) },
     // Windows and Linux: a note waiting while the model loads says so (a Mac shows what it always did)
     showLoading: platform !== 'darwin',
     store, queue, model: projectWorkflows.model, language: meetingLanguage, onStop: onMeetingStopSaved, named: (id) => callNames.finished(id), earlier: (id) => readAhead.parts(id), me,
@@ -715,7 +722,9 @@ app.whenReady().then(() => {
   // the mic picker under the note's bar: the mics, the chosen one, and switching while recording
   hookMics({ helper: micListHelper(process.platform) === 'system' || isFake() ? runHelper : audioHelper.run, settingsFile, send: (channel, payload) => win?.webContents.send(channel, payload) })
   hookShare({ store, window: () => win })
-  hookFolders({ store, changed: () => { win?.webContents.send('folders:changed'); folderSuggestions.refresh() } })
+  hookFolders({ store, changed: () => { win?.webContents.send('folders:changed'); folderSuggestions.refresh() },
+    // filed in a folder that points at a folder on disk: the meeting is saved there
+    added: (folderId, meetingId) => { if (store.meeting(meetingId)?.state === 'done') void projectWorkflows.meetingFiled(folderId, meetingId) } })
   // every meeting to one file and back; what an import adds shows up on home
   hookBackup({ db: store.db, meetingsDir: join(userDataDir(), 'meetings'), window: () => win, recording: () => !!activeMeeting() || !!resumingId,
     changed: () => { win?.webContents.send('meetings:changed'); win?.webContents.send('conversations:list', conversations.list()); void indexer.refresh(); folderSuggestions.refresh() },

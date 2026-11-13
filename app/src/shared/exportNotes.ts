@@ -138,6 +138,28 @@ export function toMarkdownFile(meeting: Meeting, notes: string, segments: Segmen
   return out.join('\n\n') + '\n'
 }
 
+/** "<day> <title>": a meeting's own folder in a project, so the folders sort by date */
+export function folderNameFor(title: string, startedAt: number): string {
+  const name = fileNameFor(title, startedAt).replace(/\.md$/, '')
+  const day = name.slice(-10)
+  return `${day} ${name.slice(0, -11)}`
+}
+
+/**
+ * A meeting as it is kept in a project folder: summary.md (the notes, with the meeting's id so Yogurt knows the folder
+ * again) and transcript.md beside it.
+ */
+export function toMeetingFiles(meeting: Meeting, notes: string, segments: Segment[]): Record<'summary.md' | 'transcript.md', string> {
+  const title = meeting.title.replace(/\s+/g, ' ').trim()
+  const when = new Date(meeting.startedAt)
+  const people = meeting.attendees.map((a) => a.name.trim()).filter(Boolean)
+  const front = ['---', `yogurt-meeting: ${meeting.id}`, `date: ${when.toISOString()}`, ...(people.length ? [`attendees: [${people.map((p) => JSON.stringify(p)).join(', ')}]`] : []), '---', '']
+  const body = notes.replace(/<\/?mine>/g, '').trim()
+  const summary = [...front, `# ${escapeText(title)}`, '', when.toLocaleString(language(), { dateStyle: 'long', timeStyle: 'short' }), '', ...(body ? [body, ''] : []), `[${t('Transcript')}](transcript.md)`, ''].join('\n')
+  const transcript = [`# ${escapeText(title)}: ${t('Transcript')}`, '', segments.length ? docToMd(transcriptDoc(segments, { gap: true })) : '', '', '[Summary](summary.md)', ''].join('\n')
+  return { 'summary.md': summary, 'transcript.md': transcript }
+}
+
 /** "<title> <day>.md" with nothing a file name cannot hold; never a hidden file or a very long one */
 export function fileNameFor(title: string, startedAt: number): string {
   const d = new Date(startedAt)

@@ -11,6 +11,8 @@ export type Project = {
   input?: string; checkInput?: boolean; speechLanguage?: string; followUps?: boolean
   /** the post-meeting agent ('' or absent: off), its model, and the workspace folder it writes proposals to */
   agent?: AgentProvider | ''; agentModel?: string; agentInbox?: string
+  /** the Yogurt folder whose meetings are saved into this project's folder ('' or absent: none) */
+  yogurtFolder?: string
 }
 export type ProjectSegment = { id: string; startMs: number; endMs: number; text: string; speaker: string | null; cluster?: string }
 export type ProjectJob = {
@@ -23,19 +25,17 @@ export type ProjectJob = {
 export type VoiceProfile = { id: string; name: string; model: string; samples: number[][]; confirmed: true }
 export type InboxItem = { id: string; projectId: string; source: string; bytes: number; modified: number; state: 'pending' | 'ignored' | 'imported' }
 export type ProjectState = { projects: Project[]; jobs: ProjectJob[]; profiles: VoiceProfile[]; configured: string[]; defaultProjectId?: string; inbox?: InboxItem[]; inboxErrors?: Record<string, string> }
-/** The sidebar workspace: a project folder on disk shown in place of Yogurt's own folders */
-export type WorkspaceState = { projectId?: string; name?: string; root?: string; obsidian?: boolean }
-export type WorkspaceEntry = { name: string; path: string; kind: 'folder' | 'file' }
-export type WorkspaceFile = { path: string; absolute: string; text: string; modified: number; meetingId?: string }
+/** Yogurt folders that point at a folder on disk: folderId is the Yogurt folder, root the folder on disk */
+export type WorkspaceProject = { id: string; name: string; root: string; output: string; obsidian: boolean; folderId?: string }
+export type WorkspaceState = { projects: WorkspaceProject[] }
 export type WorkspaceApi = {
   state(): Promise<WorkspaceState>
-  use(projectId: string | null): Promise<void>
-  list(path: string): Promise<WorkspaceEntry[]>
-  read(path: string): Promise<WorkspaceFile>
-  open(path: string): Promise<void>
-  reveal(path: string): Promise<void>
-  saveMeeting(meetingId: string): Promise<{ path: string; skipped?: 'edited' } | null>
-  meetingFile(meetingId: string): Promise<string | null>
+  /** Point a Yogurt folder at a folder on disk the person picks (its meetings are saved there), or stop (unlink). */
+  link(folderId: string): Promise<WorkspaceProject | null>
+  unlink(folderId: string): Promise<void>
+  /** show a project's folder in Finder */
+  reveal(projectId: string): Promise<void>
+  saveMeeting(meetingId: string, projectId: string): Promise<{ path: string; projectId: string; skipped?: string[] } | null>
   onChange(cb: () => void): () => void
 }
 export type ProjectsApi = {

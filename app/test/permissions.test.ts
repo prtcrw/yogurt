@@ -13,6 +13,24 @@ describe('permission status from the helper', () => {
     expect(parseStatus({ calendar: 'restricted' }).calendar).toBe('restricted')
     expect(parseStatus({ mic: 'notDetermined' })).toEqual({ mic: 'unknown', systemAudio: 'unknown', calendar: 'unknown', accessibility: 'unknown' })
   })
+  it('Accessibility: Yogurt itself being trusted counts even when the separate helper is not, and asking adds Yogurt to the list', async () => {
+    const prompts: boolean[] = []
+    let trusted = false
+    const calls: string[][] = []
+    const p = createPermissions({
+      helper: async (a) => { calls.push(a); return a[0] === 'permissions' ? { accessibility: false } : { trusted: false } },
+      notifications: () => 'unknown', askNotifications: async () => 'unknown', open: () => {}, axAsked: () => true, setAxAsked: () => {},
+      appTrusted: (prompt) => { prompts.push(prompt); return trusted },
+    })
+    expect((await p.status()).accessibility).toBe('denied')
+    await p.request('accessibility')
+    expect(prompts).toContain(true)
+    expect(calls.some(c => c[0] === 'ax-auth')).toBe(true)
+    trusted = true
+    expect((await p.status()).accessibility).toBe('granted')
+    await p.openSettings('accessibility')
+    expect(prompts.filter(Boolean).length).toBe(2)
+  })
   it('reads anything odd, or nothing, as unknown', () => {
     expect(parseStatus(null)).toEqual({ mic: 'unknown', systemAudio: 'unknown', calendar: 'unknown', accessibility: 'unknown' })
     expect(parseStatus({ mic: 7, systemAudio: 'x', calendar: {}, accessibility: 'yes' })).toEqual({ mic: 'unknown', systemAudio: 'unknown', calendar: 'unknown', accessibility: 'unknown' })
